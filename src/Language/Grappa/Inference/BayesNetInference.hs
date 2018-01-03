@@ -279,4 +279,5 @@ bpNutsSample net num_samples nutsLen nutsLenAdapt =
          dtrace ("bpNutsSample: go " ++ show k) $
          do asgn' <- liftMWCRandM $ nutsSample net nutsLen nutsLenAdapt asgn
             asgn_next <- liftMWCRandM $ beliefPropSample net asgn'
+            emitSample asgn_next
             go (k+1) asgn_next
