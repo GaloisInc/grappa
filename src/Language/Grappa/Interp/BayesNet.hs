@@ -278,7 +278,7 @@ type BNDynRepr =
    (ADHORepr VoidM BNAssign))
 
 -- | Destruct the empty type that is a dynamic representation of a distribution
-noDynDist :: GExpr BNDynRepr (Dist' a) -> b
+noDynDist :: GExpr BNDynRepr (Dist a) -> b
 noDynDist (GExpr (_, (d, _))) =
   case d emptyBNAssign VParam of { }
 
@@ -508,7 +508,7 @@ evalIntNodeProbs net asgn var =
   [0 .. bnNodeCardinality net var - 1]
 
 -- | Evaluate the top-level expression of a Bayes net, given an assignment. This
--- assumes that the type @a@ is a dynamic type, i.e., does not contain @Dist'@.
+-- assumes that the type @a@ is a dynamic type, i.e., does not contain 'Dist'.
 bnEval :: BayesNet a -> BNAssign Double -> BNDynRetReprF a
 bnEval net = evalDynExpr (bnExprToDyn (GExpr $ bnTopExpr net))
 
@@ -626,7 +626,7 @@ data BNExpr a where
                (adt (GExpr BNExprRepr) (ADT adt)) ->
                BNExpr (ADT adt)
   BNExprDist :: (DistVar a -> BNBuilder (GExpr BNExprRepr a)) ->
-                BNExpr (Dist' a)
+                BNExpr (Dist a)
 
 -- | Extract a dynamic probability value from a 'BNExpr' of 'Prob' type
 bnExprToProb :: GExpr BNExprRepr Prob -> GExpr BNDynRepr Prob
@@ -634,7 +634,7 @@ bnExprToProb (GExpr (BNExprProb p)) = embedRepr p
 bnExprToProb (GExpr (BNExprDynamic e)) = e
 
 -- | Extract a distribution function from a 'BNExpr' of distribution type
-bnExprToDist :: GExpr BNExprRepr (Dist' a) ->
+bnExprToDist :: GExpr BNExprRepr (Dist a) ->
                 DistVar a -> BNBuilder (GExpr BNExprRepr a)
 bnExprToDist (GExpr (BNExprDist f)) = f
 bnExprToDist (GExpr (BNExprDynamic dyn_dist)) = noDynDist dyn_dist
@@ -691,7 +691,7 @@ instance ValidExprRepr BNExprRepr where
   interp__'projTuple (GExpr (BNExprADT tup)) k = k tup
   interp__'projTuple (GExpr (BNExprTuple tup)) k = k tup
   interp__'projTuple (GExpr (BNExprDynamic dyn)) k =
-    -- FIXME HERE: use strong projection when the return type contains Dist'
+    -- FIXME HERE: use strong projection when the return type contains 'Dist'
     bnDynToExpr $ interp__'projTuple dyn (bnExprToDyn . k . mapADT bnDynToExpr)
 
   interp__'app (GExpr (BNExprFun f)) arg = f arg
@@ -1111,7 +1111,7 @@ bnSubsetDistFromPDF :: (BNAssign Double -> MWCRandM Double) ->
                        (Double -> Double) ->
                        (GExpr BNDynRepr R -> GExpr BNDynRepr R) ->
                        (GExpr BNDynRepr R -> GExpr BNDynRepr Prob) ->
-                       GExpr BNExprRepr (Dist' R)
+                       GExpr BNExprRepr (Dist R)
 bnSubsetDistFromPDF sampler toReals fromReals pdf =
   GExpr $ BNExprDist $ \dv ->
   case dv of
@@ -1126,7 +1126,7 @@ bnSubsetDistFromPDF sampler toReals fromReals pdf =
 -- that interval
 bnPosRealsDistFromPDF :: (BNAssign Double -> MWCRandM Double) ->
                          (GExpr BNDynRepr R -> GExpr BNDynRepr Prob) ->
-                         GExpr BNExprRepr (Dist' R)
+                         GExpr BNExprRepr (Dist R)
 bnPosRealsDistFromPDF sampler =
   bnSubsetDistFromPDF sampler
   (\x ->
@@ -1142,19 +1142,19 @@ bnPosRealsDistFromPDF sampler =
 -- that interval
 bnUnitRealsDistFromPDF :: (BNAssign Double -> MWCRandM Double) ->
                           (GExpr BNDynRepr R -> GExpr BNDynRepr Prob) ->
-                          GExpr BNExprRepr (Dist' R)
+                          GExpr BNExprRepr (Dist R)
 bnUnitRealsDistFromPDF sampler =
   bnSubsetDistFromPDF sampler (toRealLbUb 0 1) (fromRealLbUb 0 1)
 
 -- | Build a real-valued distribution from a PDF
 bnDistFromPDF :: (BNAssign Double -> MWCRandM Double) ->
                  (GExpr BNDynRepr R -> GExpr BNDynRepr Prob) ->
-                 GExpr BNExprRepr (Dist' R)
+                 GExpr BNExprRepr (Dist R)
 bnDistFromPDF sampler pdf = bnSubsetDistFromPDF sampler id id pdf
 
 -- | Build a real-valued list distribution from a list of PDFs
 bnListDistFromPDFs :: [GExpr BNDynRepr R -> GExpr BNDynRepr Prob] ->
-                      GExpr BNExprRepr (Dist' (GList R))
+                      GExpr BNExprRepr (Dist (GList R))
 bnListDistFromPDFs = error "FIXME HERE NOW: write bnListDistFromPDFs!"
 
 

@@ -24,13 +24,13 @@ import Language.Grappa.Model
 -- | The Grappa type of distributions. How it is represented depends on the
 -- interpretation being used, so we do not instantiate it to an actual Haskell
 -- type.
-data Dist' a deriving Typeable
+data Dist a deriving Typeable
 
 -- | Is a type considered to be a base type in Grappa?
 type family IsBaseType a where
   IsBaseType (a -> b) = 'False
   IsBaseType (ADT a) = 'False
-  IsBaseType (Dist' a) = 'False
+  IsBaseType (Dist a) = 'False
   IsBaseType a = 'True
 
 -- | An object-level representation of lists of Grappa types
@@ -62,7 +62,7 @@ data GrappaTypeRepr (a :: *) where
   -- ^ A Grappa tuple type; note that we require 'GrappaADT', since the
   -- instance for 'TupleF' requires a class instance of 'GrappaTypeList' for
   -- @as@, not just a 'GrappaTypeListRepr'
-  GrappaDistType :: GrappaTypeRepr a -> GrappaTypeRepr (Dist' a)
+  GrappaDistType :: GrappaTypeRepr a -> GrappaTypeRepr (Dist a)
   -- ^ A Grappa distribution type
   GrappaArrowType :: GrappaTypeRepr a -> GrappaTypeRepr b ->
                      GrappaTypeRepr (a -> b)
@@ -130,7 +130,7 @@ instance (GrappaType a, GrappaType b, GrappaType c,
 -- Instances for representing the core Grappa type constructs
 instance GrappaTypeList as => GrappaType (ADT (TupleF as)) where
   grappaTypeRepr = GrappaTupleType grappaTypeListRepr
-instance GrappaType a => GrappaType (Dist' a) where
+instance GrappaType a => GrappaType (Dist a) where
   grappaTypeRepr = GrappaDistType grappaTypeRepr
 instance (GrappaType a, GrappaType b) => GrappaType (a -> b) where
   grappaTypeRepr = GrappaArrowType grappaTypeRepr grappaTypeRepr
@@ -312,33 +312,33 @@ mapDistVar f (VData x) = VData (f x)
 -- * Grappa Distributions
 --
 
-type Dist c a = DistVar a -> Model c a
+type ModelDist c a = DistVar a -> Model c a
 
 -- | Build a Grappa distribution from any Haskell distribution type whose
 -- support type is atomic
 atomicDist :: (c d, PDFDist d, IsAtomic (Support d) ~ 'True) =>
-              d -> Dist c (Support d)
+              d -> ModelDist c (Support d)
 atomicDist d VParam = sample d
 atomicDist d (VData x) = observe x d >> return x
 
 -- | The 'Normal' distribution as a 'Model' combinator
-normal :: c Normal => R -> R -> Dist c R
+normal :: c Normal => R -> R -> ModelDist c R
 normal mu sigma = atomicDist (Normal mu sigma)
 
 -- | The 'Uniform' distribution as a 'Model' combinator
-uniform :: c Uniform => R -> R -> Dist c R
+uniform :: c Uniform => R -> R -> ModelDist c R
 uniform low high = atomicDist (Uniform low high)
 
 -- | The 'Cauchy' distribution
-cauchy :: c Cauchy => Dist c R
+cauchy :: c Cauchy => ModelDist c R
 cauchy = atomicDist Cauchy
 
 -- | The 'Categorical' distribution
-categorical :: c Categorical => GList Prob -> Dist c Int
+categorical :: c Categorical => GList Prob -> ModelDist c Int
 categorical lst = atomicDist (Categorical (toList lst))
 
 -- | The 'Dirichlet' distribution
-dirichlet :: c Dirichlet => GList R -> Dist c (GList R)
+dirichlet :: c Dirichlet => GList R -> ModelDist c (GList R)
 dirichlet lst = error "dirichlet function not implemented!"
 
 -- | The 'MVNormal' distribution as a 'Model' combinator; NOTE that the @c@
@@ -351,37 +351,37 @@ dirichlet lst = error "dirichlet function not implemented!"
 -- here for matrices, so the vector and matrix types are not the same as those
 -- used by 'MVNormal'... so this function is actually undefined, and we just use
 -- the @Interp__@ method to define it for each interpretation.
-mvNormal :: c MVNormal => RMatrix -> RMatrix -> Dist c RMatrix
+mvNormal :: c MVNormal => RMatrix -> RMatrix -> ModelDist c RMatrix
 mvNormal _ _ = error "mv_normal not defined!"
 
-type ReprDist d f a = DistVar a -> ReprModel d f a
+type ReprModelDist d f a = DistVar a -> ReprModel d f a
 
 -- | Build a Grappa distribution from any Haskell distribution type whose
 -- support type is atomic
 atomicDistRepr :: (IsAtomic (ReprSupport d) ~ 'True, c d f) =>
-              d f -> ReprDist c f (f (ReprSupport d))
+              d f -> ReprModelDist c f (f (ReprSupport d))
 atomicDistRepr d VParam = sampleRepr d
 atomicDistRepr d (VData x) = observeRepr x d >> return x
 
 -- | The 'Normal' distribution as a 'Model' combinator
-normalRepr :: (c ReprNormal f) => f R -> f R -> ReprDist c f (f R)
+normalRepr :: (c ReprNormal f) => f R -> f R -> ReprModelDist c f (f R)
 normalRepr mu sigma = atomicDistRepr (ReprNormal mu sigma)
 
 -- | The 'Uniform' distribution as a 'Model' combinator
-uniformRepr :: (c ReprUniform f) => f R -> f R -> ReprDist c f (f R)
+uniformRepr :: (c ReprUniform f) => f R -> f R -> ReprModelDist c f (f R)
 uniformRepr low high = atomicDistRepr (ReprUniform low high)
 
 -- | The 'Cauchy' distribution
-cauchyRepr :: (c ReprCauchy f) => ReprDist c f (f R)
+cauchyRepr :: (c ReprCauchy f) => ReprModelDist c f (f R)
 cauchyRepr = atomicDistRepr ReprCauchy
 
 -- | The 'Categorical' distribution
-categoricalRepr :: (c ReprCategorical f) => GList (f Prob) -> ReprDist c f (f Int)
+categoricalRepr :: (c ReprCategorical f) => GList (f Prob) -> ReprModelDist c f (f Int)
 categoricalRepr lst = atomicDistRepr (ReprCategorical (toList lst))
 
 -- | The 'MVNormal' distribution
 mvNormalRepr :: (c ReprMVNormal f) => f RMatrix -> f RMatrix ->
-                ReprDist c f (f RMatrix)
+                ReprModelDist c f (f RMatrix)
 mvNormalRepr mu c = atomicDistRepr (ReprMVNormal mu c)
 
 
@@ -391,14 +391,14 @@ data MixtureCase c a
                   mixCaseWeight :: Prob }
 
 -- | The trivial mixture distribution, for a single 'MixtureCase'
-mixtureDist1 :: MixtureCase c a -> Dist c a
+mixtureDist1 :: MixtureCase c a -> ModelDist c a
 mixtureDist1 mcase var =
   case mixCaseModel mcase var of
     Just model -> model
     Nothing -> error "Singleton mixture distribution: no matching cases!"
 
 -- | FIXME HERE: document this!
-mixtureDist :: forall c a. c Categorical => [MixtureCase c a] -> Dist c a
+mixtureDist :: forall c a. c Categorical => [MixtureCase c a] -> ModelDist c a
 mixtureDist mcases var =
   do
     -- First, build a list of (model, w) pairs of models whose patterns did match

@@ -235,7 +235,7 @@ emitTVar var =
        Nothing -> throwError $ EmitErrUnknownTypeVar var
 
 -- | Emit a Grappa type to TH. If the Boolean flag is 'True', emit the "interp"
--- version of the type, which uses the Dist' type in place of 'Dist'
+-- version of the type, which uses the 'Dist' type in place of 'ModelDist'
 emitType :: Bool -> Type -> Emit TH.Type
 emitType _ (VarType var) = emitTVar var
 emitType iflag (BaseType nm tps) =
@@ -251,8 +251,8 @@ emitType iflag (TupleType tps) =
 emitType iflag (DistType tp) =
   do th_tp <- emitType iflag tp
      c_var <- emit_dist_var <$> get
-     if iflag then embedM $ [t| Dist' $(return th_tp) |] else
-       embedM $ [t| Dist $(TH.varT c_var) $(return th_tp) |]
+     if iflag then embedM $ [t| Dist $(return th_tp) |] else
+       embedM $ [t| ModelDist $(TH.varT c_var) $(return th_tp) |]
 emitType iflag (ArrowType tp1 tp2) =
   applyTHType TH.ArrowT <$> mapM (emitType iflag) [tp1, tp2]
 emitType _ UnusedType = return (TH.ConT ''Unused)
@@ -594,14 +594,14 @@ ingestTypeApp (TH.SigT _ _) _ =
 
 -- Ingest types of the form @Dist c a@
 ingestTypeApp (TH.ConT dist_nm) [TH.VarT model_var, th_tp]
-  | dist_nm == ''Dist
+  | dist_nm == ''ModelDist
   = do setTHVarRole model_var RoleDistSet
        tp <- ingestType th_tp
        return $ DistType tp
 
--- Ingest types of the form @Dist' a@
+-- Ingest types of the form @'Dist' a@
 ingestTypeApp (TH.ConT dist_nm) [th_tp]
-  | dist_nm == ''Dist'
+  | dist_nm == ''Dist
   = do tp <- ingestType th_tp
        return $ DistType tp
 
@@ -705,7 +705,7 @@ ingestType tp =
 -- previously-ingested type and ensures that it corresponds.
 ingestTypeAppInterp :: TH.Type -> [TH.Type] -> Ingest Type
 ingestTypeAppInterp (TH.ConT dist_nm) [th_tp]
-  | dist_nm == ''Dist' = do
+  | dist_nm == ''Dist = do
       tp <- ingestTypeInterp th_tp
       return $ DistType tp
 ingestTypeAppInterp TH.ArrowT [th_tp1, th_tp2] = do

@@ -51,10 +51,7 @@ library
   exposed-modules:     Language.Grappa
 
                      -- The modules of Grappa
-                     -- , Language.Grappa.Rand.Derived
                      , Language.Grappa.Rand.MWCRandM
-                     -- , Language.Grappa.Rand.Lazy
-                     -- , Language.Grappa.Rand.PCG
                      , Language.Grappa.Distribution
                      , Language.Grappa.Model
 
@@ -75,10 +72,6 @@ library
 
                      -- Grappa interpretations
                      , Language.Grappa.Interp
-                     , Language.Grappa.Interp.Identity
-                     -- , Language.Grappa.Interp.Lazy
-                     -- , Language.Grappa.Interp.LazyAD
-                     -- , Language.Grappa.Interp.BaseType
                      , Language.Grappa.Interp.Supply
                      , Language.Grappa.Interp.StandardHORepr
                      , Language.Grappa.Interp.SupplyJointM
@@ -86,7 +79,6 @@ library
                      , Language.Grappa.Interp.ADHORepr
                      , Language.Grappa.Interp.BayesNet
                      , Language.Grappa.Interp.Prior
-                     -- , Language.Grappa.Interp.OldAD
                      , Language.Grappa.Interp.UntypedAST
                      , Language.Grappa.Interp.MonoidRepr
                      , Language.Grappa.Interp.ProductRepr

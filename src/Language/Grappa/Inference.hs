@@ -90,15 +90,17 @@ ppParam ip =
         go PTFloat  = PP.text "Float"
 
 grappaPrint :: GrappaShow t => t -> IO ()
-grappaPrint x = putStrLn (grappaShow x) >> hFlush stdout
+grappaPrint x =
+  dtrace ("grappaPrint: " ++ grappaShow x) $
+  putStrLn (grappaShow x) >> hFlush stdout
 
-sampleDist :: ValidRepr repr => GExpr repr (Dist' a) -> GVExpr repr a ->
+sampleDist :: ValidRepr repr => GExpr repr (Dist a) -> GVExpr repr a ->
               GStmt repr a
 sampleDist d dv = interp__'sample d dv interp__'return
 
 runPrior :: (GrappaType a,
              GrappaShow (StandardHOReprF PriorM Double Int a)) =>
-            Source a -> GExpr PriorRepr (Dist' a) -> IO ()
+            Source a -> GExpr PriorRepr (Dist a) -> IO ()
 runPrior src d =
   do dv <- liftIO $ interp__'source src
      res <- runMWCRandM $ samplePrior $ sampleDist d dv
@@ -118,10 +120,10 @@ type VectorFun a = V.Vector Int -> V.Vector Double -> a
 -- | Helper for inference methods using gradient information
 gradHelper :: GrappaType a =>
               Source a ->
-              GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist' a) ->
+              GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist a) ->
               (forall r i.
                SupplyJointCtx (VectorSupply r i) r i =>
-               GExpr (SJRepr (VectorSupply r i)) (Dist' a)) ->
+               GExpr (SJRepr (VectorSupply r i)) (Dist a)) ->
               MWCRandM (V.Vector Int, V.Vector Double,
                         VectorFun (SJReprF (VectorSupply Double Int) a),
                         VectorFun Prob, VectorFun (V.Vector Double))
@@ -139,10 +141,10 @@ gradHelper src init_d d =
 runHMC :: (GrappaShow (SJReprF (VectorSupply Double Int) a), GrappaType a) =>
           Int -> Int -> R ->
           Source a ->
-          GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist' a) ->
+          GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist a) ->
           (forall r i.
            SupplyJointCtx (VectorSupply r i) r i =>
-           GExpr (SJRepr (VectorSupply r i)) (Dist' a)) ->
+           GExpr (SJRepr (VectorSupply r i)) (Dist a)) ->
           IO ()
 runHMC len l e src init_d d =
   runMWCRandM $
@@ -171,10 +173,10 @@ hmcMethod = InferenceMethod
 runHMCDA :: (GrappaShow (SJReprF (VectorSupply Double Int) a), GrappaType a) =>
             Int -> Int -> R ->
             Source a ->
-            GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist' a) ->
+            GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist a) ->
             (forall r i.
              SupplyJointCtx (VectorSupply r i) r i =>
-             GExpr (SJRepr (VectorSupply r i)) (Dist' a)) ->
+             GExpr (SJRepr (VectorSupply r i)) (Dist a)) ->
             IO ()
 runHMCDA len lenAdapt lambda src init_d d =
   runMWCRandM $
@@ -208,10 +210,10 @@ hmcdaMethod = InferenceMethod
 runNUTS :: (GrappaType a, GrappaShow (SJReprF (VectorSupply Double Int) a)) =>
            Int -> Int ->
            Source a ->
-           GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist' a) ->
+           GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist a) ->
            (forall r i.
             SupplyJointCtx (VectorSupply r i) r i =>
-            GExpr (SJRepr (VectorSupply r i)) (Dist' a)) ->
+            GExpr (SJRepr (VectorSupply r i)) (Dist a)) ->
            IO ()
 runNUTS len lenAdapt src init_d d =
   runMWCRandM $
@@ -242,7 +244,7 @@ nutsMethod = InferenceMethod
   }
 
 runBpNuts :: (GrappaShow (BNDynRetReprF a), GrappaType a) =>
-             Int -> Int -> Int -> Source a -> GExpr BNExprRepr (Dist' a) ->
+             Int -> Int -> Int -> Source a -> GExpr BNExprRepr (Dist a) ->
              IO ()
 runBpNuts len nutsLen nutsLenAdapt src d =
   runMWCRandM $
@@ -270,10 +272,10 @@ bpNutsMethod = InferenceMethod
 
 runGD :: (Show (SJReprF (VectorSupply Double Int) a), GrappaType a) =>
          Double -> Source a ->
-         GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist' a) ->
+         GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist a) ->
          (forall r i.
           SupplyJointCtx (VectorSupply r i) r i =>
-          GExpr (SJRepr (VectorSupply r i)) (Dist' a)) ->
+          GExpr (SJRepr (VectorSupply r i)) (Dist a)) ->
          IO ()
 runGD epsilon src init_d d =
   do (init_is, init_rs, outF, probF, gradF) <-
@@ -300,7 +302,7 @@ gradientDescentMethod = InferenceMethod
   }
 
 runPython :: ToPythonDistVar a =>
-             Source a -> GExpr UntypedRepr (Dist' a) -> IO ()
+             Source a -> GExpr UntypedRepr (Dist a) -> IO ()
 runPython src d =
   do dv <- interp__'source src
      let model = sampleDist d dv

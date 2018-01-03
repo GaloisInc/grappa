@@ -38,7 +38,7 @@ data StandardHORepr (m :: * -> *) (r :: *) (i :: *) :: *
 type family StandardHOReprF m r i a :: * where
   StandardHOReprF m r i (a -> b) =
     (StandardHOReprF m r i a -> StandardHOReprF m r i b)
-  StandardHOReprF m r i (Dist' a) = (DistVar a -> m (StandardHOReprF m r i a))
+  StandardHOReprF m r i (Dist a) = (DistVar a -> m (StandardHOReprF m r i a))
   StandardHOReprF m r i (ADT adt) =
     adt (GExpr (StandardHORepr m r i)) (ADT adt)
   StandardHOReprF m r i Bool    = Bool
@@ -360,7 +360,7 @@ instance (Monad m, Num i, Eq i, Show i,
       ctor_dist :: DistVar Int -> m (StandardHOReprF m r i Int)
       ctor_dist =
         unGExpr (interp__categorical
-                 :: GExpr (StandardHORepr m r i) (GList Prob -> Dist' Int)) $
+                 :: GExpr (StandardHORepr m r i) (GList Prob -> Dist Int)) $
         fromHaskellListF GExpr [GExpr probNil, GExpr probCons]
       -- Helper wrapper around mkNil
       mkNilH = mkNil (VADT Tuple0)

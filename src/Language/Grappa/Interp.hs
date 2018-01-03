@@ -101,9 +101,9 @@ class ValidExprRepr repr => ValidRepr (repr :: *) where
   -- model statement constructs
   interp__'return :: GExpr repr b -> GStmt repr b
   interp__'let :: GExpr repr a -> (GExpr repr a -> GStmt repr b) -> GStmt repr b
-  interp__'sample :: GExpr repr (Dist' a) -> GVExpr repr a ->
+  interp__'sample :: GExpr repr (Dist a) -> GVExpr repr a ->
                      (GExpr repr a -> GStmt repr b) -> GStmt repr b
-  interp__'mkDist :: (GVExpr repr a -> GStmt repr a) -> GExpr repr (Dist' a)
+  interp__'mkDist :: (GVExpr repr a -> GStmt repr a) -> GExpr repr (Dist a)
 
 
 -- | The class of expression representations that can handle a specific @adt@
@@ -388,33 +388,33 @@ instance (Interp__gammaProb repr, Interp__probToLogReal repr) =>
 ----------------------------------------------------------------------
 
 class ValidExprRepr repr => Interp__normal repr where
-  interp__normal :: GExpr repr (R -> R -> Dist' R)
+  interp__normal :: GExpr repr (R -> R -> Dist R)
 
 class ValidExprRepr repr => Interp__uniform repr where
-  interp__uniform :: GExpr repr (R -> R -> Dist' R)
+  interp__uniform :: GExpr repr (R -> R -> Dist R)
 
 class ValidExprRepr repr => Interp__gamma repr where
-  interp__gamma :: GExpr repr (R -> R -> Dist' R)
+  interp__gamma :: GExpr repr (R -> R -> Dist R)
 
 class ValidExprRepr repr => Interp__beta repr where
-  interp__beta :: GExpr repr (R -> R -> Dist' R)
+  interp__beta :: GExpr repr (R -> R -> Dist R)
 
 class ValidExprRepr repr => Interp__dirichlet repr where
-  interp__dirichlet :: GExpr repr (GList R -> Dist' (GList R))
+  interp__dirichlet :: GExpr repr (GList R -> Dist (GList R))
 
 class ValidExprRepr repr => Interp__categorical repr where
-  interp__categorical :: GExpr repr (GList Prob -> Dist' Int)
+  interp__categorical :: GExpr repr (GList Prob -> Dist Int)
 
 class ValidExprRepr repr => Interp__ctorDist__ListF repr where
   interp__ctorDist__Nil ::
-    GExpr repr (Dist' (GTuple '[]) -> Dist' (GList a))
+    GExpr repr (Dist (GTuple '[]) -> Dist (GList a))
   interp__ctorDist__Cons ::
-    GExpr repr (Dist' (GTuple '[a, GList a]) -> Dist' (GList a))
+    GExpr repr (Dist (GTuple '[a, GList a]) -> Dist (GList a))
 
 class ValidExprRepr repr => Interp__adtDist__ListF repr where
   interp__adtDist__ListF :: GExpr repr
-    (Prob -> Dist' (GTuple '[]) -> Prob -> Dist' (GTuple '[a, GList a]) ->
-     Dist' (GList a))
+    (Prob -> Dist (GTuple '[]) -> Prob -> Dist (GTuple '[a, GList a]) ->
+     Dist (GList a))
 
 
 ----------------------------------------------------------------------
@@ -422,7 +422,7 @@ class ValidExprRepr repr => Interp__adtDist__ListF repr where
 ----------------------------------------------------------------------
 
 class (ValidExprRepr repr) => Interp__mv_normal repr where
-  interp__mvNormal :: GExpr repr (RMatrix -> RMatrix -> Dist' RMatrix)
+  interp__mvNormal :: GExpr repr (RMatrix -> RMatrix -> Dist RMatrix)
 
 -- | Build an 'RMatrix' from a list of lists
 matrix_list :: [[R]] -> RMatrix
@@ -489,7 +489,7 @@ class (ValidExprRepr repr, Show a) => Interp__gtrace repr a b where
 
 -- A completely empty model, like
 -- model { } = nothing
-emptyModel :: ValidRepr repr => GExpr repr (Dist' (GTuple '[]))
+emptyModel :: ValidRepr repr => GExpr repr (Dist (GTuple '[]))
 emptyModel = interp__'mkDist $ \ v ->
   interp__'vProjTuple v
     (\ Tuple0 -> interp__'return (interp__'injTuple Tuple0))
@@ -499,7 +499,7 @@ emptyModel = interp__'mkDist $ \ v ->
 basicModel :: ( ValidRepr repr
               , Interp__normal repr
               , Interp__'integer repr R
-              ) => GExpr repr (Dist' R)
+              ) => GExpr repr (Dist R)
 basicModel = interp__'mkDist $ \ vx ->
   interp__'sample (interp__normal `interp__'app` (interp__'integer 0)
                                   `interp__'app` (interp__'integer 1))
@@ -508,7 +508,7 @@ basicModel = interp__'mkDist $ \ vx ->
 -- A model that samples from a normal, like
 -- model d { x } = x ~ d
 distParamModel :: (ValidRepr repr, Interp__normal repr) =>
-                  GExpr repr (Dist' R -> Dist' R)
+                  GExpr repr (Dist R -> Dist R)
 distParamModel = interp__'lam $ \ d ->
   interp__'mkDist $ \ vx ->
   interp__'sample d vx $ \x -> interp__'return x
@@ -516,7 +516,7 @@ distParamModel = interp__'lam $ \ d ->
 -- A model that samples from a normal, like
 -- model { x, y } = x ~ normal 0 1; y ~ normal 0 1
 twoVarModel :: (ValidRepr repr, Interp__normal repr, Interp__'integer repr R) =>
-               GExpr repr (Dist' (GTuple '[R,R]))
+               GExpr repr (Dist (GTuple '[R,R]))
 twoVarModel = interp__'mkDist $ \ vs ->
   interp__'vProjTuple vs
     (\ (Tuple2 vx vy) ->
@@ -529,7 +529,7 @@ twoVarModel = interp__'mkDist $ \ vs ->
 -- A model that samples from a normal, like
 -- model { x, y } = x ~ normal 0 1; y ~ normal 0 1
 tupleArgModel :: ( ValidRepr repr, Interp__normal repr) =>
-                 GExpr repr (GTuple '[R,R] -> Dist' R)
+                 GExpr repr (GTuple '[R,R] -> Dist R)
 tupleArgModel = interp__'lam $ \ vtup ->
   interp__'projTuple vtup (\ (Tuple2 x y) ->
     interp__'mkDist $ \ v ->
@@ -538,7 +538,7 @@ tupleArgModel = interp__'lam $ \ vtup ->
 -- A model that loops over a list, like
 -- model m { Nil } = empty
 lNil :: (ValidRepr repr, Interp__ctorDist__ListF repr) =>
-        GExpr repr (Dist' (GList R))
+        GExpr repr (Dist (GList R))
 lNil = interp__'mkDist $ \ v ->
   let nDist = interp__'mkDist $ \_ -> interp__'return (interp__'injTuple Tuple0)
   in interp__'sample (interp__ctorDist__Nil `interp__'app` nDist) v interp__'return
@@ -551,7 +551,7 @@ listModel :: ( ValidRepr repr
              , Interp__normal repr
              , Interp__'rational repr Prob
              , Interp__adtDist__ListF repr
-             ) => GExpr repr (Dist' (GList R))
+             ) => GExpr repr (Dist (GList R))
 listModel = interp__'mkDist $ \ v ->
   let dist = interp__adtDist__ListF `interp__'app`
                (interp__'rational 0.5) `interp__'app`
@@ -572,7 +572,7 @@ interp__empty2 ::
       forall repr a_a4bMy.
       (ValidRepr repr, Interp__'integer repr a_a4bMy,
        Interp__'plus repr a_a4bMy) =>
-      GExpr repr a_a4bMy -> GExpr repr (Dist' (GTuple '[]))
+      GExpr repr a_a4bMy -> GExpr repr (Dist (GTuple '[]))
 interp__empty2 x
       = interp__'mkDist
           (\ tup -> interp__'vProjTuple tup $ \ Tuple0 ->
