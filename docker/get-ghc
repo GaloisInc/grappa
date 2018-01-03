@@ -1,0 +1,8 @@
+#!/bin/bash
+
+filename=ghc-7.10.3b-x86_64-deb8-linux.tar.xz
+for source in http://vault.galois.com/haskell/ghc/dist/7.10.3 http://downloads.haskell.org/~ghc/7.10.3
+do
+    wget "$source/$filename" -O "$filename" && break
+done
+diff <(sha256sum "$filename") <(grep "$filename" /usr/local/ghc/SHA256SUMS)

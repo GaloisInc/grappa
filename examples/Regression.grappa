@@ -1,0 +1,86 @@
+
+--
+-- IID definition
+--
+
+model iid (0::Int) d { Nil } = nothing
+      iid len d { Cons x xs } =
+  x ~ d
+  xs ~ iid (len - 1) d
+
+
+--
+-- Linear Regression Model
+--
+
+model linear_body sigma m b { x, y } =
+  x ~ uniform 0 1000
+  y ~ normal (m*x + b) sigma
+
+model linear len sigma { m, b, xys } =
+  m ~ normal 0 5
+  b ~ uniform (-5) 5
+  xys ~ iid len (linear_body sigma m b)
+
+
+--
+-- Linear Regression with Linear Noise
+--
+
+model linear_lnoise_body sigma m b { x, y } =
+  x ~ uniform 0 1000
+  y ~ normal (m*x + b) (sigma * x)
+
+model linear_lnoise len sigma { m, b, xys } =
+  m ~ normal 0 50
+  -- m ~ uniform (-5) 5
+  -- b ~ uniform (-5) 5
+  b ~ normal 0 50
+  xys ~ iid len (linear_lnoise_body sigma m b)
+
+
+--
+-- Quadratic Regression
+--
+
+model quad_body sigma a b c { x, y } =
+  x ~ uniform 0 1000
+  y ~ normal (a*x*x + b*x + c) sigma
+
+model quad len sigma { a, b, c, xys } =
+  a ~ normal 0 5
+  b ~ normal 0 5
+  c ~ uniform (-5) 5
+  xys ~ iid len (quad_body sigma a b c)
+
+
+--
+-- Quadratic Regression with Linear Noise
+--
+
+model quad_lnoise_body sigma a b c { x, y } =
+  x ~ uniform 0 1000
+  y ~ normal (a*x*x + b*x + c) (sigma * x)
+
+model quad_lnoise len sigma { a, b, c, xys } =
+  a ~ normal 0 5
+  b ~ normal 0 5
+  c ~ uniform (-5) 5
+  xys ~ iid len (quad_lnoise_body sigma a b c)
+
+
+--
+-- Top-level Main Function
+--
+
+{-
+main =
+  (2, 4, _) ~ linear_lnoise 40 0.5
+  using prior ()
+-}
+
+main =
+  (_, _, read "regression.csv" as csv) ~ linear_lnoise 40 0.5
+  using nuts (500, 50)
+  -- using hmc (10,10,0.01)
+  -- using hmcda (30,30,2)

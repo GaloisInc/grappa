@@ -1,0 +1,93 @@
+
+--
+-- List utilities
+--
+-- We prefix them with "g_" so they do not clash with the Haskell namespace
+--
+
+fun g_replicate (0::Int) a = Nil
+    g_replicate n a = Cons a (g_replicate (n-1) a)
+
+fun g_head err Nil = gerror err
+    g_head err (Cons x _) = x
+
+fun g_tail Nil = gerror 200
+    g_tail (Cons _ xs) = xs
+
+fun g_length Nil = 0
+    g_length (Cons _ xs) = 1 + g_length xs
+
+-- Build a static list of a fixed size from a possibly dynamic list
+fun static_list (0::Int) xs = Nil
+    static_list len xs =
+      Cons (g_head (len + g_length xs) xs) (static_list (len - 1) (g_tail xs))
+
+fun g_nth (0::Int) (Cons x xs) = x
+    g_nth n (Cons x xs) = g_nth (n-1) xs
+    g_nth n Nil = gerror 137
+
+-- A version of g_nth that builds a static list
+fun g_nth_len len n xs = static_list len (g_nth n xs)
+
+fun realsToProbs Nil = Nil
+    realsToProbs (Cons r rs) =
+      Cons (realToProb r) (realsToProbs rs)
+
+fun realsToProbs2 err rs =
+  Cons (realToProb (g_head err rs)) (Cons (realToProb (g_head (err+1) rs)) Nil)
+
+
+--
+-- Probability matrices
+--
+
+model nil_model { Nil } = nothing
+
+model prob_matrix1 alpha { Cons probs nil } =
+  probs ~ dirichlet (Cons alpha (Cons alpha Nil))
+  nil ~ nil_model
+
+model prob_matrix2 alpha { Cons probs probss } =
+  probs ~ dirichlet (Cons alpha (Cons alpha Nil))
+  probss ~ prob_matrix1 alpha
+
+
+--
+-- HMMs
+--
+
+-- Generate probability matrices for transitions between hidden states and for
+-- relating hidden states to observed states in a hidden Markov model, as well
+-- as a list of probabilities for the initial state
+model hmm_params2 alpha_hid alpha_obs { (trans_pm, obs_pm, init) } =
+  trans_pm ~ prob_matrix2 alpha_hid
+  obs_pm   ~ prob_matrix2 alpha_obs
+  init     ~ dirichlet (Cons 1 (Cons 1 Nil))
+
+model hmm_sequence (trans_pmat, obs_pmat, init) { Nil } = nothing
+                                                { Cons o os } =
+  hid ~ categorical (Cons 0.5 (Cons 0.5 Nil)) -- (realsToProbs2 23 init)
+  o ~ categorical (realsToProbs2 64 (if (hid == 0) then (g_head 1 trans_pmat)
+                                  else (g_head 2 (g_tail trans_pmat))))
+  os ~ hmm_sequence (trans_pmat, obs_pmat,
+                     (if (hid == 0) then (g_head 3 obs_pmat)
+                      else (g_head 4 (g_tail obs_pmat))))
+
+model iid d { Nil | 0.25 } = nothing
+            { Cons x xs | 0.25 } =
+  x ~ d
+  xs ~ iid d
+
+model hmm alpha_hid alpha_obs { (params, obs_seqs) } =
+  params   ~ hmm_params2 alpha_hid alpha_obs
+  obs_seqs ~ iid (hmm_sequence params)
+
+
+--
+-- Top-level Main Function
+--
+
+main =
+  (_, read "examples/hmm_data1.json" as json) ~ hmm 0.1 0.1
+  -- using prior ()
+  using bpNuts (50, 20, 10)

@@ -1,0 +1,4 @@
+Host gitlab-int
+HostName gitlab-int.galois.com
+User git
+IdentityFile ~/.ssh/docker_id

@@ -1,0 +1,229 @@
+--
+-- Misc Helper Functions
+--
+
+-- Sum the results of applying function f to all elements of list l
+fun sum_list f Nil = 0
+  | sum_list f (Cons x xs) = f x + sum_list f xs
+
+-- Build a random variable x that is the result of applying f to some value
+-- x_raw drawn from distribution d
+model sample_then_map f d { x } =
+  x_raw ~ d;
+  x = f x_raw;
+
+-- Draw IID random values for a finite list of variables
+model iid d { Nil } =
+model iid d { Cons x xs } =
+  x ~ d;
+  xs ~ iid d;
+
+-- Draw one random variable from parameterized distribution (d param) for each
+-- param value in a list of params
+model foreach d params { vs } =
+  case params of
+    Nil -> vs = Nil;
+    Cons param params_rest ->
+      vs = Cons (d param) (foreach d params_rest);
+
+
+--
+-- Dirichlet Mixture Processes
+--
+
+-- Sample a truncated list of V_k and theta_k clusters for a Dirichlet mixture
+model dirichletClusters k m theta_dist { clusters } =
+  if k == 0 then
+    clusters ~ Nil;
+  else
+    v ~ Beta 1 m;
+    theta ~ theta_dist;
+    clusters ~ Cons (v,theta) (dirichletClusters m theta_dist);
+
+-- Calculate the product (1 - v1) * ... * (1 - vn) of a list of vi's
+fun oneMinusProduct Nil = 1
+  | oneMinusProduct (Cons v vs) = (1 - v) * oneMinusProduct vs
+
+-- Calculate the cluster weights for a Dirichlet model from a list of V's (note
+-- that the input list is reversed in the process)
+fun dirichletWeights Nil = Nil
+  | dirichletWeights (Cons vk vs) =
+    Cons (vk * oneMinusProduct vs) (dirichletWeights vs)
+
+-- Sample a list of values from a Dirichlet model
+model dirichletPhis clusters ws phi_dist { Nil } =
+    | dirichletPhis clusters ws phi_dist { Cons phi phis } =
+  z ~ Multinomial ws;
+  theta = snd (nth z clusters);
+  phi ~ phi_dist theta;
+  phis ~ dirichletPhis clusters ws phi_dist;
+
+-- Dirichlet process mixture model, using k clusters
+model dirichlet k m theta_dist phi_dist { (clusters, phis) } =
+  clusters ~ dirichletClusters k m theta_dist;
+  weights = dirichletWeights (reverse clusters);
+  phis ~ dirichletPhis clusters weights phi_dist;
+
+
+
+--
+-- Baseline Model
+--
+
+-- The last line of equation (8), defining the distribution for theta_k
+model baselineThetaDist (beta_0, kappa_0, theta_0, s_0, mu_rho_0, sigma2_rho_0,
+                         mu_sigma_0, sigma2_sigma_0)
+                        { (beta_k, sigma_k, mu_sigma_k, mu_rho_k) } =
+  (beta_k, sigma_k) ~ NormalInverseWishart beta_0 kappa_0 theta_0 s_0;
+  mu_sigma_k ~ Normal mu_sigma_0 sigma2_sigma_0;
+  mu_rho_k ~ Normal mu_rho_0 sigma2_rho_0;
+
+-- The first line of (8), defining the distribution for phi_i from theta_k
+model baselinePhiDist sigma2_sigma_u0 sigma2_rho_u0
+                      (beta_k, sigma_k, mu_sigma_k, mu_rho_k)
+                      { (beta_i, sigma2_ui, rho_ui) } =
+  beta_i ~ MVNormal beta_k sigma_k;
+
+  -- sigma2_ui is in (0, infinity), so we first draw it from the real line and
+  -- then map it to this set using an exponential function
+  sigma2_ui ~ sample_then_map exp (Normal mu_sigma_k sigma2_sigma_u0);
+
+  -- Similarly, rho2_ui is also drawn from (0, infinity)
+  rho2_ui ~ sample_then_map exp (Normal mu_rho_k sigma2_rho_u0);
+
+-- The whole of equation (8), the distribution for the parameters (phis) of the
+-- baseline values for all individuals using a Dirichlet process mixture model.
+-- The parameter k bounds the number of clusters used in the model.
+model baselinePhis k m1 a1 { phis } =
+  phis ~ dirichlet k m1 (baselineThetaDist a1) baselinePhiDist;
+
+-- Helper function to define the covariance matrix between different individual
+-- parameters in the baseline model below
+fun baselineCovariance t_i sigma2_ui rho_ui j j' =
+  sigma2_ui * rho_ui ^ abs (t_i ! j - t_i ! j')
+
+-- Equation (7), the distribution for the baseline values for an individual
+model baseline_i (t_i, x_i, (beta_i, sigma2_ui, rho_ui)) { b_i } =
+  b_i ~ MVNormal (transpose (x_i) .*. beta_i)
+                 (mkMatrix (baselineCovariance t_i sigma2_ui rho_ui));
+
+
+--
+-- Treatment Response Model
+--
+
+-- This is the treatment-response g_id function of equation (5)
+fun g_response (a1, a2, a3, gamma, b) t =
+  let b0 = -a1 / (1 + exp (a2 * gamma / 2)) in
+  let a0 = (a1 + 2*b0 - b) / (1 + exp (-a3 * gamma / 2)) in
+  if t < gamma then
+    b0 + a1 / (1 + exp (-a2 * (t - gamma / 2)))
+  else
+    b + a0 / (1 + exp (a3 * (t - 3 * gamma / 2)))
+
+
+-- The first line of equation (9), defining the distribution for the parameters
+-- of the treatment-response function for individual i and treatment d
+model responsePhiDist d_d0 mu_dk { (a1, a2, a3, gamma, b) }
+  -- First, draw un-transformed "raw" values from a multivariate normal
+  <| a1, a2_raw, a3_raw, gamma, b_raw |> ~ MVNormal mu_dk d_d0;
+
+  -- Now transform a2 and a3 to put them in the interval (0,1)
+  a2 = invlogit a2_raw;
+  a3 = invlogit a3_raw;
+
+  -- Finally, transform b such that b / (g_response gamma) is in (0,1); note
+  -- that, when t = gamma, g_response (a1, a2, a3, gamma, b_raw) gamma does not
+  -- depend on b_raw
+  b = invlogit b_raw * (g_response (a1, a2, a3, gamma, b_raw) gamma);
+
+
+-- The last line of equation (9), defining the distribution for theta_dk, which
+-- gives the center for the normal that defines the d*kth cluster
+model responseThetaDist (mu_d0, d_d0) { (a1, a2, a3, gamma, b) } =
+  <| a1, a2, a3, gamma, b |> ~ MVNormal mu_d0 d_d0;
+
+-- The whole Dirichlet process for sampling the phi_dk values in equation (9)
+model responsePhis k (m2d, a2d) { phis } =
+  phis ~ dirichlet k m2d (responseThetaDist a2d) responsePhiDist;
+
+-- The response of individual i at time t_ij to the l-th treatment
+fun response_ijl phi_is t_ij (tau_l, a_il) =
+  if tau_l < t_ij then
+    g_response (nth a_il phi_is) (t_ij - tau_l)
+  else
+    0
+
+-- The response of individual i at time t_ij to the treatments; this represents
+-- equation (4), which sums over all treatments given at times before t_ij
+fun response_ij treatments_i phi_i t_ij =
+  sum_list (response_ijl phi_i t_ij) treatments_i
+
+-- Build the vector of responses for individual i at times t_ij
+fun response_i treatments_i phi_i t_i =
+  map_vector (response_ij treatments_i phi_i) t_i
+
+-- The total list of responses for all individuals i at times t_ij, given lists
+-- of (tau_il, A_il) pairs, phi_i values for different treatments, and t_ij
+-- times of the observations
+fun get_responses treatments phis ts =
+  case (treatments, phis, ts) of
+    (Cons treatments_i treatments', Cons phi_i phis', Cons t_i ts) ->
+      Cons (response_i treatments_i phi_i t_i)
+           (get_responses treatments' phis' ts')
+    _ -> Nil
+
+
+
+--
+-- Noise Model
+--
+
+-- This models equations (11) in the paper, for selecting noise parameters
+model noiseParams_i (sigma, nu, mu1, mu2, sigma2_1, sigma2_2) unused
+                    { (sigma2_i, sigma2_ds, rho_ds) } =
+  -- Draw sigma_epsilon_i^2 for i in {1,2} from an inverse gamma distribution
+  sigma2_i ~ InvGamma sigma nu;
+
+  -- Draw a list of sigma_epsilon_d^2 noise parameters, all from (0, infinity)
+  sigma2_ds ~ iid (sample_then_map exp (Normal mu1 sigma2_1));
+
+  -- Draw a list of rho_epsilon_d noise parameters, all from (0, 1)
+  rho_ds ~ iid (sample_then_map invlogit (Normal mu2 sigma2_2));
+
+
+--
+-- Top-Level Model
+--
+
+fun y_i_covariance_l t_i j j' ((tau_l, a_il), (sigma2_d, rho_d)) =
+  if t_i !! j > tau_l && t_i !! j' > tau_l then
+    sigma2_d * rho_d ^ (abs (t_i !! j - t_i !! j'))
+  else
+    0
+
+fun y_i_covariance treatments_i t_i treatments_noise_i j j' =
+  sum (y_i_covariance_l t_i j j') treatments_noise_i
+
+model y_i_model (b, r, t_i, (sigma2_i, sigma2_ds, rho_ds), treatments_i) { y } =
+  y ~ MVNormal (b + r,
+                identity (length t_i)
+                + mkMatrix (y_i_covariance (zip (zip sigma2_ds rho_ds) treatments_i)));
+
+
+model topModel k mu1 mu2 m1 a1 m2_a2s xs treatments ts { ys } =
+  -- Draw the phi_is for each individual i using the Dirichlet process defined
+  -- above in baselinePhis, then use these to draw the baseline values
+  b_phis ~ baselinePhis k m1 a1;
+  bs ~ foreach baseline_i (zip3 ts xs b_phis);
+
+  -- Draw the phi_di's for each treatment type d and individual i, and then
+  -- calculate the response vectors for all individuals
+  r_phis ~ foreach (responsePhis k) m2_a2s;
+
+  -- Draw values for the noise parameters for the individuals and the
+  -- treatments; note that xs is just a dummy variable here, with the same
+  -- number of elements as there are individuals
+  noise_params ~ foreach noiseParams_i xs;
+
+  ys ~ foreach y_i_model (zip5 bs ts noise_params r_phis sigmas)

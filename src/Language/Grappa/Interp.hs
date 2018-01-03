@@ -1,0 +1,631 @@
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns #-}
+
+module Language.Grappa.Interp where
+
+import qualified Numeric.Log as Log
+
+import qualified Numeric.AD.Mode.Forward as ADF
+import qualified Numeric.AD.Mode.Reverse as ADR
+import qualified Numeric.AD.Internal.Reverse as ADR (Tape)
+import qualified Data.Reflection as ADR (Reifies)
+
+import Language.Grappa.Distribution
+import Language.Grappa.GrappaInternals
+import Language.Grappa.Frontend.DataSource
+
+import qualified Data.Matrix as M
+import qualified Data.Vector as V
+
+import Debug.Trace
+
+
+----------------------------------------------------------------------
+-- * Grappa Expression Types
+----------------------------------------------------------------------
+
+newtype GExpr repr a = GExpr { unGExpr :: GExprRepr repr a }
+newtype GVExpr repr a = GVExpr { unGVExpr :: GVExprRepr repr a }
+newtype GStmt repr a = GStmt { unGStmt :: GStmtRepr repr a }
+
+instance GrappaShow (GExprRepr repr a) => GrappaShow (GExpr repr a) where
+  grappaShow (GExpr x) = grappaShow x
+
+instance GrappaShowListContents (GExprRepr repr a) =>
+         GrappaShowListContents (GExpr repr a) where
+  showListContents (GExpr x) = showListContents x
+
+----------------------------------------------------------------------
+-- * Valid Representations of Grappa Expressions and Programs
+----------------------------------------------------------------------
+
+-- | The class of valid representations of Grappa expressions
+class ValidExprRepr (repr :: *) where
+  type GExprRepr repr (a :: *) :: *
+
+  -- NOTE: this is not used directly by the compiler
+  interp__'bottom :: GExpr repr a
+
+  interp__'injTuple :: TupleF ts (GExpr repr) (ADT (TupleF ts))
+                    -> GExpr repr (GTuple ts)
+  interp__'projTuple :: IsTypeList ts
+                     => GExpr repr (GTuple ts)
+                     -> (TupleF ts (GExpr repr) (ADT (TupleF ts)) -> GExpr repr r)
+                     -> GExpr repr r
+
+  interp__'app :: GExpr repr (a -> b) -> GExpr repr a -> GExpr repr b
+  interp__'lam :: (GExpr repr a -> GExpr repr b) -> GExpr repr (a -> b)
+
+  interp__'fix :: (GExpr repr a -> GExpr repr a) -> GExpr repr a
+
+
+-- | The class of expression representations with strong tuples
+class ValidExprRepr repr => StrongTupleRepr repr where
+  -- NOTE: this is not used directly by the compiler
+  interp__'strongProjTuple :: IsTypeList ts =>
+                              GExpr repr (GTuple ts) ->
+                              TupleF ts (GExpr repr) (ADT (TupleF ts))
+
+
+-- | The class of valid representations of Grappa programs (including
+-- expressions)
+class ValidExprRepr repr => ValidRepr (repr :: *) where
+  type GVExprRepr repr (a :: *) :: *
+  type GStmtRepr repr (a :: *) :: *
+
+  interp__'projTupleStmt :: IsTypeList ts
+                         => GExpr repr (GTuple ts)
+                         -> (TupleF ts (GExpr repr) (ADT (TupleF ts)) -> GStmt repr r)
+                         -> GStmt repr r
+
+  -- v-expression constructs
+  interp__'vInjTuple :: TupleF ts (GVExpr repr) (ADT (TupleF ts))
+                     -> GVExpr repr (GTuple ts)
+  interp__'vProjTuple :: IsTypeList ts => GVExpr repr (GTuple ts)
+                      -> (TupleF ts (GVExpr repr) (ADT (TupleF ts)) -> GStmt repr r)
+                      -> GStmt repr r
+  interp__'vwild :: (GVExpr repr a -> GStmt repr b) -> GStmt repr b
+  interp__'vlift :: GrappaType a => GExpr repr a ->
+                    (GVExpr repr a -> GStmt repr b) -> GStmt repr b
+
+  -- model statement constructs
+  interp__'return :: GExpr repr b -> GStmt repr b
+  interp__'let :: GExpr repr a -> (GExpr repr a -> GStmt repr b) -> GStmt repr b
+  interp__'sample :: GExpr repr (Dist' a) -> GVExpr repr a ->
+                     (GExpr repr a -> GStmt repr b) -> GStmt repr b
+  interp__'mkDist :: (GVExpr repr a -> GStmt repr a) -> GExpr repr (Dist' a)
+
+
+-- | The class of expression representations that can handle a specific @adt@
+class ValidExprRepr repr =>
+      Interp__ADT__Expr (repr :: *) (adt :: (* -> *) -> * -> *) where
+  interp__'injADT :: adt (GExpr repr) (ADT adt) -> GExpr repr (ADT adt)
+  interp__'projADT :: GrappaType a => GExpr repr (ADT adt) ->
+                      (adt (GExpr repr) (ADT adt) -> GExpr repr a) ->
+                      GExpr repr a
+
+-- | The class of program representations that can handle a specific @adt@
+class (ValidRepr repr, Interp__ADT__Expr repr adt) =>
+      Interp__ADT (repr :: *) (adt :: (* -> *) -> * -> *) where
+  interp__'vInjADT :: adt (GVExpr repr) (ADT adt) -> GVExpr repr (ADT adt)
+  interp__'projADTStmt :: GrappaType a => GExpr repr (ADT adt) ->
+                          (adt (GExpr repr) (ADT adt) -> GStmt repr a) ->
+                          GStmt repr a
+
+-- | The class of representations that can read variables from a data source
+class Interp__'source repr a where
+  interp__'source :: Source a -> IO (GVExpr repr a)
+
+
+----------------------------------------------------------------------
+-- * Interpreting Boolean Expressions
+----------------------------------------------------------------------
+
+class (ValidExprRepr repr) => Interp__'ifThenElse repr where
+  interp__'ifThenElse :: GExpr repr Bool -> GExpr repr a -> GExpr repr a ->
+                         GExpr repr a
+
+class (ValidExprRepr repr) => Interp__not repr where
+  interp__not :: GExpr repr (Bool -> Bool)
+
+class (ValidExprRepr repr) => Interp__'amp'amp repr where
+  interp__'amp'amp :: GExpr repr (Bool -> Bool -> Bool)
+
+class (ValidExprRepr repr) => Interp__'bar'bar repr where
+  interp__'bar'bar :: GExpr repr (Bool -> Bool -> Bool)
+
+
+----------------------------------------------------------------------
+-- * Interpreting Comparison Expressions
+----------------------------------------------------------------------
+
+class (Eq a, ValidExprRepr repr) => Interp__'eq'eq repr a where
+  interp__'eq'eq :: GExpr repr (a -> a -> Bool)
+
+class (Ord a, ValidExprRepr repr) => Interp__'lt repr a where
+  interp__'lt :: GExpr repr (a -> a -> Bool)
+
+class (Ord a, ValidExprRepr repr) => Interp__'gt repr a where
+  interp__'gt :: GExpr repr (a -> a -> Bool)
+
+class (Ord a, ValidExprRepr repr) => Interp__'lt'eq repr a where
+  interp__'lt'eq :: GExpr repr (a -> a -> Bool)
+
+class (Ord a, ValidExprRepr repr) => Interp__'gt'eq repr a where
+  interp__'gt'eq :: GExpr repr (a -> a -> Bool)
+
+class (Ord a, ValidExprRepr repr) => Interp__min repr a where
+  interp__min :: GExpr repr (a -> a -> a)
+
+class (Ord a, ValidExprRepr repr) => Interp__max repr a where
+  interp__max :: GExpr repr (a -> a -> a)
+
+-- | Helper function for building comparison expressions
+interp__ifLessThan :: (Interp__'ifThenElse repr, Interp__'lt repr a) =>
+                      GExpr repr a -> GExpr repr a ->
+                      GExpr repr b -> GExpr repr b -> GExpr repr b
+interp__ifLessThan x ub e1 e2 =
+  interp__'ifThenElse (interp__'app (interp__'app interp__'lt x) ub) e1 e2
+
+-- | Helper function for building comparison expressions
+interp__ifLessThanEq :: (Interp__'ifThenElse repr, Interp__'lt'eq repr a) =>
+                        GExpr repr a -> GExpr repr a ->
+                        GExpr repr b -> GExpr repr b -> GExpr repr b
+interp__ifLessThanEq x ub e1 e2 =
+  interp__'ifThenElse (interp__'app (interp__'app interp__'lt'eq x) ub) e1 e2
+
+
+----------------------------------------------------------------------
+-- * Interpreting Numeric Expressions
+----------------------------------------------------------------------
+
+class (Num a, ValidExprRepr repr) => Interp__'plus repr a where
+  interp__'plus :: GExpr repr (a -> a -> a)
+
+class (Num a, ValidExprRepr repr) => Interp__'minus repr a where
+  interp__'minus :: GExpr repr (a -> a -> a)
+
+class (Num a, ValidExprRepr repr) => Interp__'times repr a where
+  interp__'times :: GExpr repr (a -> a -> a)
+
+class (Num a, ValidExprRepr repr) => Interp__negate repr a where
+  interp__negate :: GExpr repr (a -> a)
+
+class (Num a, ValidExprRepr repr) => Interp__abs repr a where
+  interp__abs :: GExpr repr (a -> a)
+
+class (Num a, ValidExprRepr repr) => Interp__signum repr a where
+  interp__signum :: GExpr repr (a -> a)
+
+class (Num a, ValidExprRepr repr) => Interp__fromInteger repr a where
+  interp__fromInteger :: GExpr repr (Integer -> a)
+
+class (Num a, ValidExprRepr repr) => Interp__'integer repr a where
+  interp__'integer :: Integer -> GExpr repr a
+
+-- | This is used for pattern-matching against literal integers
+class (Interp__'integer repr a) => Interp__'eqInteger repr a where
+  interp__'eqInteger :: GExpr repr a -> GExpr repr a -> GExpr repr Bool
+
+
+class (Fractional a, ValidExprRepr repr) => Interp__'div repr a where
+  interp__'div :: GExpr repr (a -> a -> a)
+
+class (Fractional a, ValidExprRepr repr) => Interp__recip repr a where
+  interp__recip :: GExpr repr (a -> a)
+
+class (Fractional a, ValidExprRepr repr) => Interp__fromRational repr a where
+  interp__fromRational :: GExpr repr (Rational -> a)
+
+class (Fractional a, ValidExprRepr repr) => Interp__'rational repr a where
+  interp__'rational :: Rational -> GExpr repr a
+
+-- | This is used for pattern-matching against literal rational expressions
+class (Interp__'rational repr a) => Interp__'eqRational repr a where
+  interp__'eqRational :: GExpr repr a -> GExpr repr a -> GExpr repr Bool
+
+
+class (Floating a, ValidExprRepr repr) => Interp__pi repr a where
+  interp__pi :: GExpr repr a
+
+class (Floating a, ValidExprRepr repr) => Interp__exp repr a where
+  interp__exp :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__log repr a where
+  interp__log :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__sqrt repr a where
+  interp__sqrt :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__'times'times repr a where
+  interp__'times'times :: GExpr repr (a -> a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__logBase repr a where
+  interp__logBase :: GExpr repr (a -> a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__sin repr a where
+  interp__sin :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__cos repr a where
+  interp__cos :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__tan repr a where
+  interp__tan :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__asin repr a where
+  interp__asin :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__acos repr a where
+  interp__acos :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__atan repr a where
+  interp__atan :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__sinh repr a where
+  interp__sinh :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__cosh repr a where
+  interp__cosh :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__tanh repr a where
+  interp__tanh :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__asinh repr a where
+  interp__asinh :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__acosh repr a where
+  interp__acosh :: GExpr repr (a -> a)
+
+class (Floating a, ValidExprRepr repr) => Interp__atanh repr a where
+  interp__atanh :: GExpr repr (a -> a)
+
+
+instance (Interp__'plus repr a, Interp__'minus repr a, Interp__'times repr a,
+          Interp__negate repr a, Interp__abs repr a, Interp__signum repr a,
+          Interp__'integer repr a) =>
+         Num (GExpr repr a) where
+  (+) = interp__'app . interp__'app interp__'plus
+  (-) = interp__'app . interp__'app interp__'minus
+  (*) = interp__'app . interp__'app interp__'times
+  negate = interp__'app interp__negate
+  abs = interp__'app interp__abs
+  signum = interp__'app interp__signum
+  fromInteger = interp__'integer
+
+instance (Num (GExpr repr a), Interp__'div repr a, Interp__recip repr a,
+          Interp__'rational repr a) =>
+         Fractional (GExpr repr a) where
+  (/) = interp__'app . interp__'app interp__'div
+  recip = interp__'app interp__recip
+  fromRational = interp__'rational
+
+
+instance (Fractional (GExpr repr a),
+          Interp__pi repr a, Interp__exp repr a, Interp__log repr a,
+          Interp__sqrt repr a, Interp__'times'times repr a,
+          Interp__logBase repr a, Interp__sin repr a, Interp__cos repr a,
+          Interp__asin repr a, Interp__acos repr a, Interp__atan repr a,
+          Interp__sinh repr a, Interp__cosh repr a, Interp__asinh repr a,
+          Interp__acosh repr a, Interp__atanh repr a) =>
+         Floating (GExpr repr a) where
+  pi = interp__pi
+  exp = interp__'app interp__exp
+  log = interp__'app interp__log
+  sqrt = interp__'app interp__sqrt
+  (**) = interp__'app . interp__'app interp__'times'times
+  logBase = interp__'app . interp__'app interp__logBase
+  sin = interp__'app interp__sin
+  cos = interp__'app interp__cos
+  asin = interp__'app interp__asin
+  acos = interp__'app interp__acos
+  atan = interp__'app interp__atan
+  sinh = interp__'app interp__sinh
+  cosh = interp__'app interp__cosh
+  asinh = interp__'app interp__asinh
+  acosh = interp__'app interp__acosh
+  atanh = interp__'app interp__atanh
+
+
+----------------------------------------------------------------------
+-- * Interpreting Probability Expressions
+----------------------------------------------------------------------
+
+-- | Convert a real to a probability
+realToProb :: R -> Prob
+realToProb r | r < 0 = 0
+realToProb r = Prob $ Log.Exp $ log r
+
+-- | Convert a real in log space to a probability
+logRealToProb :: R -> Prob
+logRealToProb = Prob . Log.Exp
+
+-- | Convert a probability to a real
+probToReal :: Prob -> R
+probToReal = exp . Log.ln . fromProb
+
+-- | Convert a probability to a real in log space
+probToLogReal :: Prob -> R
+probToLogReal = Log.ln . fromProb
+
+class ValidExprRepr repr => Interp__realToProb repr where
+  interp__realToProb :: GExpr repr (R -> Prob)
+
+class ValidExprRepr repr => Interp__logRealToProb repr where
+  interp__logRealToProb :: GExpr repr (R -> Prob)
+
+class ValidExprRepr repr => Interp__probToReal repr where
+  interp__probToReal :: GExpr repr (Prob -> R)
+
+class ValidExprRepr repr => Interp__probToLogReal repr where
+  interp__probToLogReal :: GExpr repr (Prob -> R)
+
+-- | Compute the log-gamma function as a map from reals to probabilities
+gammaProb :: R -> Prob
+gammaProb = Prob . logGamma
+
+class ValidExprRepr repr => Interp__gammaProb repr where
+  interp__gammaProb :: GExpr repr (R -> Prob)
+
+instance (Interp__gammaProb repr, Interp__probToLogReal repr) =>
+         HasGamma (GExpr repr R) where
+  logGamma =
+    Log.Exp . interp__'app interp__probToLogReal .
+    interp__'app interp__gammaProb
+
+
+----------------------------------------------------------------------
+-- * Interpreting Distributions
+----------------------------------------------------------------------
+
+class ValidExprRepr repr => Interp__normal repr where
+  interp__normal :: GExpr repr (R -> R -> Dist' R)
+
+class ValidExprRepr repr => Interp__uniform repr where
+  interp__uniform :: GExpr repr (R -> R -> Dist' R)
+
+class ValidExprRepr repr => Interp__gamma repr where
+  interp__gamma :: GExpr repr (R -> R -> Dist' R)
+
+class ValidExprRepr repr => Interp__beta repr where
+  interp__beta :: GExpr repr (R -> R -> Dist' R)
+
+class ValidExprRepr repr => Interp__dirichlet repr where
+  interp__dirichlet :: GExpr repr (GList R -> Dist' (GList R))
+
+class ValidExprRepr repr => Interp__categorical repr where
+  interp__categorical :: GExpr repr (GList Prob -> Dist' Int)
+
+class ValidExprRepr repr => Interp__ctorDist__ListF repr where
+  interp__ctorDist__Nil ::
+    GExpr repr (Dist' (GTuple '[]) -> Dist' (GList a))
+  interp__ctorDist__Cons ::
+    GExpr repr (Dist' (GTuple '[a, GList a]) -> Dist' (GList a))
+
+class ValidExprRepr repr => Interp__adtDist__ListF repr where
+  interp__adtDist__ListF :: GExpr repr
+    (Prob -> Dist' (GTuple '[]) -> Prob -> Dist' (GTuple '[a, GList a]) ->
+     Dist' (GList a))
+
+
+----------------------------------------------------------------------
+-- * Interpreting vectors and matrices
+----------------------------------------------------------------------
+
+class (ValidExprRepr repr) => Interp__mv_normal repr where
+  interp__mvNormal :: GExpr repr (RMatrix -> RMatrix -> Dist' RMatrix)
+
+-- | Build an 'RMatrix' from a list of lists
+matrix_list :: [[R]] -> RMatrix
+matrix_list elems =
+  RMatrix $ M.matrix (length (head elems)) (length elems) $ \(x,y) ->
+  elems !! y !! x
+
+-- | Build an 'RMatrix' from a Grappa list of Grappa lists
+matrix :: GList (GList R) -> RMatrix
+matrix glist_elems =
+  matrix_list (fmap toHaskellList $ toHaskellList glist_elems)
+
+class ValidExprRepr repr => Interp__matrix repr where
+  interp__matrix :: GExpr repr (GList (GList R) -> RMatrix)
+
+-- | Build an 'RMatrix' as a column vector
+vector :: GList R -> RMatrix
+vector elems = matrix_list (map (\x -> [x]) (toHaskellList elems))
+
+class ValidExprRepr repr => Interp__vector repr where
+  interp__vector :: GExpr repr (GList R -> RMatrix)
+
+-- | Build an 'RMatrix' with a given number of rows and columns from a generator
+-- function
+buildMatrix :: Int -> Int -> ((Int,Int) -> R) -> RMatrix
+buildMatrix rows cols f = RMatrix $ M.matrix rows cols f
+
+class ValidExprRepr repr => Interp__buildMatrix repr where
+  interp__buildMatrix :: GExpr repr (Int -> Int -> ((Int,Int) -> R) -> RMatrix)
+
+transpose :: RMatrix -> RMatrix
+transpose (RMatrix m) = RMatrix $ M.transpose m
+
+class ValidExprRepr repr => Interp__transpose repr where
+  interp__transpose :: GExpr repr (RMatrix -> RMatrix)
+
+
+----------------------------------------------------------------------
+-- * Misc
+----------------------------------------------------------------------
+
+-- | Like the Haskell 'error' function, but takes a numeric id (so we do not
+-- have to parse strings)
+gerror :: Int -> a
+gerror i = error $ "Error number " ++ show i ++ " in Grappa model"
+
+-- | Typeclass for interpreting 'gerror'
+class ValidExprRepr repr => Interp__gerror repr a where
+  interp__gerror :: GExpr repr (Int -> a)
+
+-- | Like the Haskell 'trace' function, but takes a numeric id (so we do not
+-- have to parse strings)
+gtrace :: Show a => Int -> a -> b -> b
+gtrace i a b = trace ("gtrace " ++ show i ++ ": " ++ show a) b
+
+-- | Typeclass for interpreting 'gtrace'
+class (ValidExprRepr repr, Show a) => Interp__gtrace repr a b where
+  interp__gtrace :: GExpr repr (Int -> a -> b -> b)
+
+
+----------------------------------------------------------------------
+-- * Example Models
+----------------------------------------------------------------------
+
+-- A completely empty model, like
+-- model { } = nothing
+emptyModel :: ValidRepr repr => GExpr repr (Dist' (GTuple '[]))
+emptyModel = interp__'mkDist $ \ v ->
+  interp__'vProjTuple v
+    (\ Tuple0 -> interp__'return (interp__'injTuple Tuple0))
+
+-- A model that samples from a normal, like
+-- model { x } = x ~ normal 0 1
+basicModel :: ( ValidRepr repr
+              , Interp__normal repr
+              , Interp__'integer repr R
+              ) => GExpr repr (Dist' R)
+basicModel = interp__'mkDist $ \ vx ->
+  interp__'sample (interp__normal `interp__'app` (interp__'integer 0)
+                                  `interp__'app` (interp__'integer 1))
+                  vx $ \x -> interp__'return x
+
+-- A model that samples from a normal, like
+-- model d { x } = x ~ d
+distParamModel :: (ValidRepr repr, Interp__normal repr) =>
+                  GExpr repr (Dist' R -> Dist' R)
+distParamModel = interp__'lam $ \ d ->
+  interp__'mkDist $ \ vx ->
+  interp__'sample d vx $ \x -> interp__'return x
+
+-- A model that samples from a normal, like
+-- model { x, y } = x ~ normal 0 1; y ~ normal 0 1
+twoVarModel :: (ValidRepr repr, Interp__normal repr, Interp__'integer repr R) =>
+               GExpr repr (Dist' (GTuple '[R,R]))
+twoVarModel = interp__'mkDist $ \ vs ->
+  interp__'vProjTuple vs
+    (\ (Tuple2 vx vy) ->
+      interp__'sample (interp__normal `interp__'app` (interp__'integer 0)
+                                      `interp__'app` (interp__'integer 1)) vx $
+        \x -> interp__'sample (interp__normal `interp__'app` (interp__'integer 0)
+                                      `interp__'app` (interp__'integer 1)) vy $
+        \y -> interp__'return (interp__'injTuple (Tuple2 x y)))
+
+-- A model that samples from a normal, like
+-- model { x, y } = x ~ normal 0 1; y ~ normal 0 1
+tupleArgModel :: ( ValidRepr repr, Interp__normal repr) =>
+                 GExpr repr (GTuple '[R,R] -> Dist' R)
+tupleArgModel = interp__'lam $ \ vtup ->
+  interp__'projTuple vtup (\ (Tuple2 x y) ->
+    interp__'mkDist $ \ v ->
+    interp__'sample (interp__normal `interp__'app` x `interp__'app` y) v interp__'return)
+
+-- A model that loops over a list, like
+-- model m { Nil } = empty
+lNil :: (ValidRepr repr, Interp__ctorDist__ListF repr) =>
+        GExpr repr (Dist' (GList R))
+lNil = interp__'mkDist $ \ v ->
+  let nDist = interp__'mkDist $ \_ -> interp__'return (interp__'injTuple Tuple0)
+  in interp__'sample (interp__ctorDist__Nil `interp__'app` nDist) v interp__'return
+
+-- A list model, like
+-- model m { Nil       | 0.5 } = empty
+--         { Cons x xs | 0.5 } = x ~ normal 0 1; xs ~ m
+listModel :: ( ValidRepr repr
+             , Interp__'integer repr R
+             , Interp__normal repr
+             , Interp__'rational repr Prob
+             , Interp__adtDist__ListF repr
+             ) => GExpr repr (Dist' (GList R))
+listModel = interp__'mkDist $ \ v ->
+  let dist = interp__adtDist__ListF `interp__'app`
+               (interp__'rational 0.5) `interp__'app`
+               nDist  `interp__'app`
+               (interp__'rational 0.5)  `interp__'app`
+               cDist
+      cDist = interp__'mkDist $ \ tup ->
+        interp__'vProjTuple tup $ \ (Tuple2 vx vxs) ->
+        interp__'sample (interp__normal `interp__'app` (interp__'integer 0)
+                               `interp__'app` (interp__'integer 1)) vx $ \ x ->
+        interp__'sample listModel vxs $ \xs ->
+        interp__'return (interp__'injTuple (Tuple2 x xs))
+      nDist = interp__'mkDist $ \ _ ->
+        interp__'return (interp__'injTuple Tuple0)
+  in interp__'sample dist v interp__'return
+
+interp__empty2 ::
+      forall repr a_a4bMy.
+      (ValidRepr repr, Interp__'integer repr a_a4bMy,
+       Interp__'plus repr a_a4bMy) =>
+      GExpr repr a_a4bMy -> GExpr repr (Dist' (GTuple '[]))
+interp__empty2 x
+      = interp__'mkDist
+          (\ tup -> interp__'vProjTuple tup $ \ Tuple0 ->
+             let y = interp__'integer 5 in
+             let _ = interp__'app (interp__'app interp__'plus x) y
+             in interp__'return (interp__'injTuple Tuple0))
+
+interp__sum ::
+  forall repr.
+  ( Interp__'integer repr Int
+  , Interp__'plus repr Int
+  , Interp__ADT repr (ListF Int)
+  ) => GExpr repr (GList Int -> Int)
+interp__sum = interp__'lam $ \ lst ->
+  interp__'projADT lst $ \ __s ->
+    case __s of
+      Cons x xs -> interp__'app (interp__'app interp__'plus x) (interp__'app interp__sum xs)
+      Nil       -> interp__'integer 0
+
+
+----------------------------------------------------------------------
+-- * Embedding Variables into Representations
+----------------------------------------------------------------------
+
+-- | Typeclass stating that 'VData' variable data of type @d@ can be embedded
+-- into representation type @r@
+class EmbedVarData d r where
+  embedVarData :: d -> r
+
+-- | FIXME: this is only used in old, free-monad-based code...
+embedDV :: (IsAtomic a ~ 'True, EmbedVarData a (f a)) =>
+           DistVar a -> DistVar (f a)
+embedDV = mapDistVar embedVarData
+
+instance EmbedVarData a a where
+  embedVarData = id
+
+instance Num a => EmbedVarData a (ADF.Forward a) where
+  embedVarData = ADF.auto
+
+instance (ADR.Reifies s ADR.Tape, Num a) =>
+         EmbedVarData a (ADR.Reverse s a) where
+  embedVarData = ADR.auto
+
+instance EmbedVarData a b => EmbedVarData (M.Matrix a) (M.Matrix b) where
+  embedVarData = fmap embedVarData
+
+
+----------------------------------------------------------------------
+-- * Embedding Haskell Data into Representations
+----------------------------------------------------------------------
+
+-- | Typeclass stating that Haskell data of type @a@ can be embedded into Grappa
+-- representation @repr@
+class EmbedRepr repr a where
+  embedRepr :: a -> GExpr repr a
