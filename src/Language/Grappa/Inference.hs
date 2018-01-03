@@ -254,7 +254,7 @@ runBpNuts len nutsLen nutsLenAdapt src d =
 bpNutsMethod :: InferenceMethod
 bpNutsMethod = InferenceMethod
   { imName = "bpNuts"
-  , imDescription = "Belief Propagation plus No U-Turn Sampling"
+  , imDescription = "Belief Propagation Sampling plus No U-Turn Sampling"
   , imParams =
       [ InferenceParam "len" "The number of samples to generate" PTInt
       , InferenceParam "nutsLen"
