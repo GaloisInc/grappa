@@ -14,7 +14,9 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 flag variational-inference
-  description: Compile the variational inference method. Implies @include-graphing@. Defaults to @True@ only to avoid the variational inference code getting out of sync with the rest of the code base.
+  description: Compile the variational inference method. Defaults to @True@ only
+               to avoid the variational inference code getting out of sync with
+               the rest of the code base.
   default: True
 
 -- flag include-graphing
