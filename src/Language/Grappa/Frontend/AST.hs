@@ -450,12 +450,13 @@ data SourceExp p
   | ListCompSrcExp (SourceExp p) [ListCompArm p] (TypeAnnot p)
 
 -- | A 'ListCompArm' is a binding of the form @Pattern <- GenExp@
-data ListCompArm p = ListCompArm (Pattern p) (GenExp p)
+data ListCompArm p = ListCompArm (RawPattern p) (GenExp p)
 
 -- | A 'GenExp' is something which can be used in generating a list
 -- comprehension.
 data GenExp p
   = VarGenExp (SrcVarName p) (TypeAnnot p)
+  | BoundVarGenExp Ident (TypeAnnot p)
   | FileGenExp Filename Ident (TypeAnnot p)
   | RangeGenExp Integer (Maybe Integer) Integer (TypeAnnot p)
 
@@ -741,6 +742,7 @@ instance PhaseC PP.Pretty p => PP.Pretty (ListCompArm p) where
 
 instance PhaseC PP.Pretty p => PP.Pretty (GenExp p) where
   pretty (VarGenExp name _) = PP.pretty name
+  pretty (BoundVarGenExp name _) = PP.text (T.unpack name)
   pretty (FileGenExp file fmt _) =
     PP.text "read" <+> PP.text (show file) <+> PP.text "as" <+> ppIdent fmt
   pretty (RangeGenExp from to by _) =

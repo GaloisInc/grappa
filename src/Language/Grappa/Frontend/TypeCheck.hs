@@ -699,6 +699,7 @@ instance Zonkable (ListCompArm Typed) where
 
 instance Zonkable (GenExp Typed) where
   zonk' (VarGenExp n tp) = VarGenExp n <$> zonkWithUnused tp
+  zonk' (BoundVarGenExp n tp) = BoundVarGenExp n <$> zonkWithUnused tp
   zonk' (FileGenExp n fmt tp) = FileGenExp n fmt <$> zonkWithUnused tp
   zonk' (RangeGenExp a b c tp) = RangeGenExp a b c <$> zonkWithUnused tp
 
@@ -1031,6 +1032,14 @@ instance TypeCheckable Type GenExp where
 
   typeCheck' (VarGenExp x ()) tp = do
     return (VarGenExp x tp)
+  typeCheck' (BoundVarGenExp x ()) tp = do
+    var_type <- lookupVarType x
+    case var_type of
+      (Just var_tp, _) -> do
+        unify tp var_tp
+        return (BoundVarGenExp x tp)
+      (Nothing, _) -> do
+        return (BoundVarGenExp x tp)
   typeCheck' (FileGenExp filename fmt ()) tp = do
     elem_tp <- exposeListType tp
     return (FileGenExp filename fmt (mkListType elem_tp))
@@ -1521,6 +1530,7 @@ instance TypeOf CompiledVarPattern where
 
 instance TypeOf GenExp where
   getTypeOf (VarGenExp _ t) = t
+  getTypeOf (BoundVarGenExp _ t) = t
   getTypeOf (FileGenExp _ _ t) = t
   getTypeOf (RangeGenExp _ _ _ t) = t
 

@@ -26,6 +26,7 @@ import Language.Grappa.Frontend.IngestEmitType
 import Language.Grappa.Inference
 import Language.Grappa.Interp
 
+
 --
 -- The Monad for Resolution
 --
@@ -384,13 +385,20 @@ instance Resolvable ListCompArm where
 
 instance Resolvable GenExp where
   resolve (VarGenExp x ()) =
-    -- A variable in a source expression literally refers to a Haskell
-    -- variable, so resolve it here to a TH.Name
-    do maybe_nm <- embedM $ TH.lookupValueName $ T.unpack x
-       nm <- case maybe_nm of
-         Just nm -> return nm
+  -- A variable in a generator expression might be bound by a list
+  -- comprehension or it might be a variable in Haskell, so try
+  -- looking it up first, and then resolve to a Haskell variable if
+  -- that fails
+    do is_bound <- Set.member x <$> resolve_bound_vars <$> get
+       maybe_nm <- embedM $ TH.lookupValueName $ T.unpack x
+       case maybe_nm of
+         _ | is_bound -> return (BoundVarGenExp x ())
+         Just nm -> return (VarGenExp nm ())
          Nothing -> throwError $ ResErrorUnbound x
-       return $ VarGenExp nm ()
+  -- These shouldn't exist before this step, but this isn't yet
+  -- encoded in the type or anything
+  resolve (BoundVarGenExp nm ()) =
+    return (BoundVarGenExp nm ())
   resolve (FileGenExp x y ()) =
     return (FileGenExp x y ())
   resolve (RangeGenExp n s y ()) =

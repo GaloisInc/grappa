@@ -623,6 +623,10 @@ instance Compilable (GenExp Rewritten) TH.Exp where
       let nm_th = (TH.AppE (TH.VarE 'allowUnused) (TH.VarE nm))
       tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
       return (TH.SigE nm_th tp_th)
+    compile' (BoundVarGenExp nm tp) =
+      let nm' = TH.mkName $ T.unpack nm
+      in TH.SigE (TH.AppE (TH.VarE 'allowUnused) (TH.VarE nm')) <$>
+         TH.AppT (TH.ConT ''Source) <$> compile tp
     compile' (FileGenExp filename fmt tp) =
       compileFileSource filename fmt tp
     compile' (RangeGenExp bg (Just to) st tp) = do

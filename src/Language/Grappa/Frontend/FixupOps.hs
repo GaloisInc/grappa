@@ -136,6 +136,7 @@ instance FixupOps ListCompArm where
 
 instance FixupOps GenExp where
   fixupOps (VarGenExp n ()) = VarGenExp n ()
+  fixupOps (BoundVarGenExp n ()) = BoundVarGenExp n ()
   fixupOps (FileGenExp path fmt ()) = FileGenExp path fmt ()
   fixupOps (RangeGenExp n m s ()) = RangeGenExp n m s ()
 
