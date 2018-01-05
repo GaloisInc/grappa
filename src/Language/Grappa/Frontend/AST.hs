@@ -450,7 +450,11 @@ data SourceExp p
   | ListCompSrcExp (SourceExp p) [ListCompArm p] (TypeAnnot p)
 
 -- | A 'ListCompArm' is a binding of the form @Pattern <- GenExp@
-data ListCompArm p = ListCompArm (RawPattern p) (GenExp p)
+--
+-- FIXME: this should use a 'RawPattern' instead of a 'Pattern', since there is
+-- no way (and no need!) to decompose patterns in list comprehensions into
+-- 'CompiledPattern's
+data ListCompArm p = ListCompArm (Pattern p) (GenExp p)
 
 -- | A 'GenExp' is something which can be used in generating a list
 -- comprehension.
