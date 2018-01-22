@@ -268,11 +268,9 @@ emitClassConstr (InterpADTConstr nm tps) = do
       adt_tp_th = applyTHType nm_th tps_th
   return $ applyTHType (TH.ConT ''Interp__ADT) [TH.VarT repr, adt_tp_th]
 
--- FIXME HERE NOW: rename emitTopTypeI -> emitTopType
-
 -- | Emit a top-level Grappa type to TH as an interpretation type
-emitTopTypeI :: TopType -> Emit TH.Type
-emitTopTypeI (TopType tvars constrs dom_tps ran_tp) =
+emitTopType :: TopType -> Emit TH.Type
+emitTopType (TopType tvars constrs dom_tps ran_tp) =
   do tvars_th <- mapM emitNewTVar tvars
      repr <- getReprVar
      constrs_th <- mapM emitClassConstr (L.nub constrs)

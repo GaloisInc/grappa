@@ -417,7 +417,7 @@ instance Compilable Type TH.Type where
   compile tp = withCompileCtx tp $ embedM $ emitType tp
 
 instance Compilable TopType TH.Type where
-  compile top_tp = withCompileCtx top_tp $ embedM $ emitTopTypeI top_tp
+  compile top_tp = withCompileCtx top_tp $ embedM $ emitTopType top_tp
 
 instance Compilable (Name Rewritten) TH.Exp where
   compile (LocalName x) = do
