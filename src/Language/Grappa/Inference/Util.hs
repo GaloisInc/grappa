@@ -107,7 +107,7 @@ genExponential rate = SamplingM $ lift $ mwcExponential rate
 -- | Probabilistically return one of two values, choosing the first with
 -- probability @p@
 randomIf :: Double -> a -> a -> SamplingM samp a
-randomIf p a1 a2 | isNaN p = error "randomIf: NaN probability!"
+randomIf p _ _ | isNaN p = error "randomIf: NaN probability!"
 randomIf p a1 a2 =
   do b <- genBernoulli p
      if b then return a1 else return a2

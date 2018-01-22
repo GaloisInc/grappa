@@ -25,7 +25,6 @@ import Language.Grappa.GrappaInternals
 import Language.Grappa.Frontend.DataSource
 
 import qualified Data.Matrix as M
-import qualified Data.Vector as V
 
 import Debug.Trace
 

@@ -34,7 +34,7 @@ import Language.Grappa.Interp.StandardHORepr
 import qualified System.Random.MWC as MWC
 import qualified System.Random.MWC.Distributions as MWC
 
-import qualified Data.Matrix as M
+-- import qualified Data.Matrix as M
 import qualified Numeric.Log as Log
 
 

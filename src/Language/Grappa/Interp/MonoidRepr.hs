@@ -6,8 +6,6 @@
 
 module Language.Grappa.Interp.MonoidRepr where
 
-import Data.Proxy
-
 import Language.Grappa.GrappaInternals
 import Language.Grappa.Interp
 

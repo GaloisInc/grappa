@@ -11,9 +11,8 @@ import qualified Language.Haskell.TH.Compat as THCompat
 
 import qualified Data.List as L
 import Data.Maybe
-import Data.Either
 
-import Data.Set (Set)
+-- import Data.Set (Set)
 import qualified Data.Set as Set
 
 import Data.Map.Strict (Map)

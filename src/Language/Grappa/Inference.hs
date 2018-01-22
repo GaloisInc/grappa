@@ -24,8 +24,6 @@ import qualified Data.Text as Text
 import qualified Language.Haskell.TH as TH
 import qualified Text.PrettyPrint.ANSI.Leijen as PP
 
-import Control.Monad
---import Control.Monad.ST
 import System.IO
 import Control.Monad.IO.Class
 
