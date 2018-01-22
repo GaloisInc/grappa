@@ -56,8 +56,6 @@ instance Pretty IngestError where
     text "Malformed type: type variable used at multiple roles:" <+>
     squotes (text (TH.pprint t)) <+>
     parens (text "treated as" <+> text (show rs))
-  pretty (IngErrorBadDist t) =
-    text "Bad distribution type:" <+> text (TH.pprint t)
   pretty (IngErrorUnknownSupport t) =
     text "Unknown support type:" <+> text (TH.pprint t)
   pretty (IngErrorNonGExpr t) =

@@ -143,9 +143,9 @@ data CompileEnv =
 
 -- | Build an empty 'CompileEnv', given a TH name for the @c@ variable and an
 -- optional 'Handle' for debugging output
-emptyCompileEnv :: Maybe Handle -> TH.Name -> TH.Name -> CompileEnv
-emptyCompileEnv debugH c repr =
-  CompileEnv { compile_emit_env = emptyEmitEnv c repr,
+emptyCompileEnv :: Maybe Handle -> TH.Name -> CompileEnv
+emptyCompileEnv debugH repr =
+  CompileEnv { compile_emit_env = emptyEmitEnv repr,
                compile_res_env = emptyResolveEnv,
                compile_current_function = Nothing,
                compile_fix_parameter = Nothing,
@@ -254,11 +254,10 @@ instance SubMonad MatchM Compile where
 -- | Run a 'Compile' computation in the 'TH.Q' monad
 runCompile :: Compile a -> TH.Q a
 runCompile m =
-  do c_var <- TH.newName "c"
-     repr_var <- TH.newName "repr"
+  do repr_var <- TH.newName "repr"
      -- FIXME: figure out how to catch IO exceptions and close debugH on error
      debugH <- TH.runIO (openFile "./grappa-compile-log" WriteMode)
-     eith <- runExceptT $ runStateT m (emptyCompileEnv (Just debugH) c_var repr_var)
+     eith <- runExceptT $ runStateT m (emptyCompileEnv (Just debugH) repr_var)
      TH.runIO $ hClose debugH
      case eith of
        Right (a,_) -> return a
@@ -268,7 +267,7 @@ runCompile m =
 
 
 --
--- Helper Functions for Building Template Haskell
+-- * Helper Functions for Building Template Haskell
 --
 
 -- | Apply a TH expression to a list of arguments
@@ -404,11 +403,10 @@ mkFormatTHExp str =
   throwError (GErrorMisc ("Unknown input format '" ++ str ++ "'"))
 
 --
--- Compiling Grappa to TH
+-- * Compiling Grappa to TH
 --
 
--- | Typeclass for things that can be compiled to TH. This is the typeclass for
--- non-interp compilation
+-- | Typeclass for things that can be compiled to TH
 class Compilable a th | a -> th where
   compile :: a -> Compile th
 
@@ -416,90 +414,144 @@ instance Compilable a th => Compilable [a] [th] where
   compile = mapM compile
 
 instance Compilable Type TH.Type where
-  compile tp = withCompileCtx tp $ embedM $ emitType False tp
+  compile tp = withCompileCtx tp $ embedM $ emitType tp
 
 instance Compilable TopType TH.Type where
-  compile top_tp = withCompileCtx top_tp $ embedM $ emitTopType top_tp
+  compile top_tp = withCompileCtx top_tp $ embedM $ emitTopTypeI top_tp
 
 instance Compilable (Name Rewritten) TH.Exp where
-  compile (LocalName x) = return $ TH.VarE $ TH.mkName $ T.unpack x
+  compile (LocalName x) = do
+    -- If this isn't set, then we're doing something wrong
+    Just curr <- compile_current_function <$> get
+    Just self <- compile_fix_parameter <$> get
+    return $ TH.VarE $ if curr == x then self else TH.mkName (T.unpack x)
   compile (GlobalName nm) = return $ TH.VarE $ gname_th_name nm
-  compile (CtorName ctor) = return $ mkCtorLamTHExp ctor []
+  compile (CtorName ctor) =
+    return $ mkCtorLamTHExpInterp ctor []
 
 instance Compilable (Exp Rewritten) TH.Exp where
-  compile e = withCompileCtx e $ compile' e where
-    compile' (NameExp nm _) = compile nm
-    compile' (LiteralExp (IntegerLit i) tp) =
-      do tp_th <- compile tp
-         return $ TH.SigE (TH.LitE $ TH.IntegerL i) tp_th
-    compile' (LiteralExp (RationalLit r) tp) =
-      do tp_th <- compile tp
-         return $ TH.SigE (TH.LitE $ TH.RationalL r) tp_th
-    compile' (SigExp expr tp) =
-      TH.SigE <$> compile' expr <*> compile tp
-    compile' (AppExp (NameExp (CtorName ctor) _) args _) =
-      mkCtorLamTHExp ctor <$> compile args
-    compile' (AppExp f args _) =
-      do f_th <- compile f
-         args_th <- compile args
-         return $ applyTHExp f_th args_th
-    compile' (TupleExp exps _) =
-      mkTupleTHExp <$> compile exps
-    compile' (OpExp enabled _ _ _) = notEnabled enabled
-    compile' (ParensExp enabled _) = notEnabled enabled
-    compile' (ListExp enabled _) = notEnabled enabled
-    compile' (LetExp n _ lhs rhs _) =
-      do lhs_th <- compile' lhs
-         rhs_th <- compile' rhs
-         return $ TH.LetE [TH.ValD (TH.VarP $ TH.mkName $ T.unpack n)
-                           (TH.NormalB lhs_th) []] rhs_th
-    compile' (CaseExp scrut cases _) =
-      liftM2 TH.CaseE (compile scrut) (compile cases)
-    compile' (ModelExp cases _) = do
-      cases_th <- compile cases
-      case cases_th of
-        [case_th] ->
-          embedM [| mixtureDist1 $(return case_th) |]
-        _ ->
-          embedM [| mixtureDist $(return $ TH.ListE cases_th) |]
-    compile' (IfExp c_e t_e e_e _) = do
-      c_th <- compile c_e
-      t_th <- compile t_e
-      e_th <- compile e_e
-      return $ TH.CondE c_th t_th e_th
-    compile' (FunExp (FunCase pats expr) _) = do
-      pats_th <- compile pats
-      e_th <- compile expr
-      return $ TH.LamE pats_th e_th
+  compile expr = withCompileCtx expr $ go expr where
+    go (NameExp nm _tp) = compile nm
+    go (LiteralExp (IntegerLit i) _) = do
+      let exp_th = TH.AppE (TH.VarE 'interp__'integer)
+                           (TH.LitE (TH.IntegerL i))
+      return $ exp_th
+    go (LiteralExp (RationalLit r) _) = do
+      let exp_th = TH.AppE (TH.VarE 'interp__'rational)
+                           (TH.LitE (TH.RationalL r))
+      return $ exp_th
+    go (SigExp e _) = do
+      compile e
+    go (AppExp f args _) = do
+      f_th <- compile f
+      args_th <- compile args
+      let goI x rs = (TH.VarE 'interp__'app) `TH.AppE` x `TH.AppE` rs
+      return $ foldl goI f_th args_th
+    go (TupleExp es _) = do
+      es_th <- compile es
+      let tup_th = mkTupleBodyTHExp es_th
+      return $ TH.AppE (TH.VarE 'interp__'injTuple) tup_th
+    go (LetExp n _ lhs rhs _) = do
+      lhs_th <- compile lhs
+      rhs_th <- compile rhs
+      return $ TH.LetE [TH.ValD (TH.VarP $ TH.mkName $ T.unpack n)
+                        (TH.NormalB lhs_th) []] rhs_th
+    go (CaseExp scrut cases _) =
+      compileInterpCase scrut cases
+    go (ModelExp cases _) = do
+      compileSubCases cases
+    go (IfExp c t e _) = do
+      c_th <- compile c
+      t_th <- compile t
+      e_th <- compile e
+      return $ applyTHExp (TH.VarE 'interp__'ifThenElse) [c_th, t_th, e_th]
+    go (FunExp (FunCase pats body) _) = do
+      let pats_th = map compileVarPat pats
+      body_th <- compile body
+      return $ mkLamInterp pats_th body_th
+    go (ListExp enabled _) = notEnabled enabled
+    go (ParensExp enabled _) = notEnabled enabled
+    go (OpExp enabled _ _ _) = notEnabled enabled
 
--- V-expressions get compiled into a pair of a DistVar expression, to go into
--- the model being sampled, and a pattern to match the output of that model
-instance Compilable (VExp Rewritten) (TH.Exp, TH.Pat) where
-  compile v = withCompileCtx v $ compile' v where
-    compile' (VarVExp x True _) =
-      return (TH.VarE $ TH.mkName $ T.unpack x,
-              TH.VarP $ TH.mkName $ T.unpack x)
-    compile' (VarVExp x False _) =
-      return (TH.ConE 'VParam,
-              TH.VarP $ TH.mkName $ T.unpack x)
-    compile' (WildVExp _) =
-      return (TH.ConE 'VParam, TH.WildP)
-    compile' (CtorVExp ctor args _) =
-      do (args_th_e, args_th_p) <- unzip <$> compile args
-         return $
-           (mkCtorDistVarTHExp ctor args_th_e,
-            mkCtorTHPat ctor args_th_p)
-    compile' (TupleVExp es _) =
-      do (es_th_e, es_th_p) <- unzip <$> compile es
-         return (mkTupleDistVarTHExp es_th_e, mkTupleTHPat es_th_p)
-    compile' (EmbedVExp e _) =
-      do e_th <- compile e
-         return (e_th, TH.WildP)
-    compile' (SigVExp vexp tp) =
-      do (e_th, patt_th) <- compile vexp
-         tp_th <- compile tp
-         return (TH.SigE e_th (applyTHType (TH.ConT ''DistVar) [tp_th]),
-                 TH.SigP patt_th tp_th)
+
+--
+-- ** Pattern-Matching Compilation
+--
+
+class (Compilable body TH.Exp) => CaseType r body | r -> body where
+  getPattern :: r -> Pattern Rewritten
+  getBody    :: r -> body
+  getTupleProjector :: r -> TH.Name
+
+instance CaseType (ExpCase Rewritten) (Exp Rewritten) where
+  getPattern (ExpCase pat _ _ _) = pat
+  getBody (ExpCase _ body _ _) = body
+  getTupleProjector _ = 'interp__'projTuple
+
+instance CaseType (StmtCase Rewritten) (Stmt Rewritten) where
+  getPattern (StmtCase pat _ _) = pat
+  getBody (StmtCase _ body _) = body
+  getTupleProjector _ = 'interp__'projTupleStmt
+
+instance CaseType (ModelSubCase Rewritten) (Stmt Rewritten) where
+  getPattern (ModelSubCase pat _ _) = pat
+  getBody (ModelSubCase _ _ body) = body
+  getTupleProjector _ = 'interp__'projTupleStmt
+
+compileInterpCase :: (Show r, CaseType r b) => Exp Rewritten -> [r] -> Compile TH.Exp
+compileInterpCase scrut cases
+  | any isCtor cases = do
+      scrut_th <- compile scrut
+      cases_th <- forM cases $ \ cs -> do
+        patt_th <- compile (getPattern cs)
+        body_th <- compile (getBody cs)
+        return $ TH.Match patt_th (TH.NormalB body_th) []
+      scr_var <- embedM $ TH.newName "scrut"
+      return $ applyTHExp (TH.VarE 'interp__'projADT)
+        [ scrut_th
+        , TH.LamE [TH.VarP scr_var] $
+            TH.CaseE (TH.VarE scr_var) cases_th
+        ]
+  | any isLit cases = do
+      scrut_th <- compile scrut
+      compileLitMatch scrut_th cases
+  | [cs] <- cases
+  , CompiledTuplePat pats _ <- getPattern cs = do
+      scrut_th <- compile scrut
+      let pat_th = map compileVarPat pats
+      body_th <- compile (getBody cs)
+      return $ applyTHExp (TH.VarE (getTupleProjector cs))
+        [ scrut_th
+        , TH.LamE [mkTupleBodyTHPat pat_th] body_th
+        ]
+  | [] <- cases = error "Unexpected empty case alternatives list"
+  | otherwise = error ("Unsure how to deal with these pattern matches: " ++ show cases)
+  where isCtor (getPattern->CompiledCtorPat {}) = True
+        isCtor _ = False
+        isLit (getPattern->CompiledLitPat {}) = True
+        isLit _ = False
+
+compileLitMatch :: (Show r, CaseType r b) => TH.Exp -> [r] -> Compile TH.Exp
+compileLitMatch _ [cs] | CompiledBasicPattern _ <- getPattern cs =
+  compile (getBody cs)
+compileLitMatch scrut (cs:rs) | CompiledLitPat l tp <- getPattern cs = do
+  l_th <- compile (LiteralExp l tp :: Exp Rewritten)
+  c_th <- compile (getBody cs)
+  e_th <- compileLitMatch scrut rs
+  let cmp = TH.VarE $ case l of
+        IntegerLit _  -> 'interp__'eqInteger
+        RationalLit _ -> 'interp__'eqRational
+  let cond_th = applyTHExp cmp [scrut, l_th]
+  return $ applyTHExp (TH.VarE 'interp__'ifThenElse) [cond_th, c_th, e_th]
+compileLitMatch _ (cs:_) =
+  error ("Unexpected pattern in compiling literal matches: " ++ show (getPattern cs))
+compileLitMatch _ [] =
+  error "Unexpected empty cases in compiling literal matches"
+
+
+--
+-- ** Compiling Posterior Expressions
+--
 
 compileFileSource :: Filename -> T.Text -> Type -> Compile TH.Exp
 compileFileSource filename fmt tp = do
@@ -525,6 +577,86 @@ compileFileSource filename fmt tp = do
           $(return fmt_th)))
         :: Source $(return tp_th)
         |]
+
+compileBasicDistVarPatt :: CompiledVarPattern Rewritten -> Compile TH.Pat
+compileBasicDistVarPatt (VarCPat x tp) = do
+  tp_th <- compile tp
+  let dv_tp = TH.AppT (TH.ConT ''DistVar) tp_th
+  return $ TH.SigP (TH.VarP $ TH.mkName $ T.unpack x) (dv_tp)
+compileBasicDistVarPatt (WildCPat _) = embedM [p| _ |]
+
+-- | Compile a Grappa pattern into a TH pattern over 'DistVar's
+compileDistVarPatt :: Pattern Rewritten -> Compile TH.Pat
+compileDistVarPatt (CompiledBasicPattern pat) =
+  compileBasicDistVarPatt pat
+compileDistVarPatt (CompiledCtorPat ctor patts _) =
+  do patts_th <- mapM compileBasicDistVarPatt patts
+     param_args_th <- forM patts_th $ \_ -> embedM [| VParam |]
+     embedM [p| (matchADTDistVar
+                 $(return $
+                   applyTHExp (TH.ConE $ ctor_th_name ctor) param_args_th) ->
+                 ($(return $ TH.ConP (ctor_th_name ctor) patts_th))) |]
+compileDistVarPatt (CompiledTuplePat patts _) =
+  do patts_th <- mapM compileBasicDistVarPatt patts
+     param_args_th <- forM patts_th $ \_ -> embedM [| VParam |]
+     embedM [p| (matchADTDistVar
+                 $(return $ mkTupleBodyTHExp param_args_th) ->
+                 ($(return $ mkTupleBodyTHPat patts_th))) |]
+compileDistVarPatt (CompiledLitPat _ (ADTType _ _)) =
+  error "compileDistVarPatt: literal pattern of ADT type!"
+compileDistVarPatt (CompiledLitPat (IntegerLit i) _) =
+  embedM $ [p| (matchAtomicDistVar $(TH.litE $ TH.IntegerL i) -> True) |]
+compileDistVarPatt (CompiledLitPat (RationalLit r) _) =
+  embedM $ [p| (matchAtomicDistVar $(TH.litE $ TH.RationalL r) -> True) |]
+
+compileArmExpr :: ListCompArm Rewritten -> Compile TH.Exp
+compileArmExpr lca@(ListCompArm _ ge) = withCompileCtx lca $ compile ge
+
+compileArmPat :: [ListCompArm Rewritten] -> Compile TH.Pat
+compileArmPat [ListCompArm pat _] = compileDistVarPatt pat
+compileArmPat _ = error "FIXME"
+  -- do
+  --   let pats = [ (pat, case pat of
+  --                    _ -> getTypeOf pat)
+  --              | ListCompArm pat _ <- lcs ]
+  --   compileDistVarPatt (CompiledTuplePat (map fst pats) (TupleType (map snd pats)))
+
+zipTypes :: Type -> Type -> Compile Type
+zipTypes t1 t2
+  | Just e1 <- matchListType t1
+  , Just e2 <- matchListType t2
+  = return (mkListType (TupleType [e1, e2]))
+zipTypes _ _ = error "Trying to zip a non-list!"
+
+instance Compilable (GenExp Rewritten) TH.Exp where
+  compile ge = withCompileCtx ge $ compile' ge where
+    compile' (VarGenExp nm tp) = do
+      let nm_th = (TH.AppE (TH.VarE 'allowUnused) (TH.VarE nm))
+      tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
+      return (TH.SigE nm_th tp_th)
+    compile' (BoundVarGenExp nm tp) =
+      let nm' = TH.mkName $ T.unpack nm
+      in TH.SigE (TH.AppE (TH.VarE 'allowUnused) (TH.VarE nm')) <$>
+         TH.AppT (TH.ConT ''Source) <$> compile tp
+    compile' (FileGenExp filename fmt tp) =
+      compileFileSource filename fmt tp
+    compile' (RangeGenExp bg (Just to) st tp) = do
+      let Just elm = matchListType tp
+      elem_th <- compile elm
+      let bgE = return (TH.SigE (TH.LitE (TH.IntegerL bg)) elem_th)
+          stE = return (TH.LitE (TH.IntegerL st))
+          toE = return (TH.LitE (TH.IntegerL to))
+      ee_th <-  lift $ lift [| dvToSource (embedDistVar (enumFromToByF $(bgE) $(toE) $(stE))) |]
+      tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
+      return (TH.SigE ee_th tp_th)
+    compile' (RangeGenExp bg Nothing st tp) = do
+      let Just elm = matchListType tp
+      elem_th <- compile elm
+      let bgE = return (TH.SigE (TH.LitE (TH.IntegerL bg)) elem_th)
+          stE = return (TH.LitE (TH.IntegerL st))
+      ee_th <- lift $ lift [| dvToSource (embedDistVar (enumFromByF $(bgE) $(stE))) |]
+      tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
+      return (TH.SigE ee_th tp_th)
 
 instance Compilable (SourceExp Rewritten) TH.Exp where
   compile sexp = withCompileCtx sexp $ compile' sexp where
@@ -597,382 +729,34 @@ instance Compilable (SourceExp Rewritten) TH.Exp where
         , fst zipped_th
         ]
 
-zipTypes :: Type -> Type -> Compile Type
-zipTypes t1 t2
-  | Just e1 <- matchListType t1
-  , Just e2 <- matchListType t2
-  = return (mkListType (TupleType [e1, e2]))
-zipTypes _ _ = error "Trying to zip a non-list!"
-
-compileArmExpr :: ListCompArm Rewritten -> Compile TH.Exp
-compileArmExpr lca@(ListCompArm _ ge) = withCompileCtx lca $ compile ge
-
-compileArmPat :: [ListCompArm Rewritten] -> Compile TH.Pat
-compileArmPat [ListCompArm pat _] = compileDistVarPatt pat
-compileArmPat _ = error "FIXME"
-  -- do
-  --   let pats = [ (pat, case pat of
-  --                    _ -> getTypeOf pat)
-  --              | ListCompArm pat _ <- lcs ]
-  --   compileDistVarPatt (CompiledTuplePat (map fst pats) (TupleType (map snd pats)))
-
-
-instance Compilable (GenExp Rewritten) TH.Exp where
-  compile ge = withCompileCtx ge $ compile' ge where
-    compile' (VarGenExp nm tp) = do
-      let nm_th = (TH.AppE (TH.VarE 'allowUnused) (TH.VarE nm))
-      tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
-      return (TH.SigE nm_th tp_th)
-    compile' (BoundVarGenExp nm tp) =
-      let nm' = TH.mkName $ T.unpack nm
-      in TH.SigE (TH.AppE (TH.VarE 'allowUnused) (TH.VarE nm')) <$>
-         TH.AppT (TH.ConT ''Source) <$> compile tp
-    compile' (FileGenExp filename fmt tp) =
-      compileFileSource filename fmt tp
-    compile' (RangeGenExp bg (Just to) st tp) = do
-      let Just elm = matchListType tp
-      elem_th <- compile elm
-      let bgE = return (TH.SigE (TH.LitE (TH.IntegerL bg)) elem_th)
-          stE = return (TH.LitE (TH.IntegerL st))
-          toE = return (TH.LitE (TH.IntegerL to))
-      ee_th <-  lift $ lift [| dvToSource (embedDistVar (enumFromToByF $(bgE) $(toE) $(stE))) |]
-      tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
-      return (TH.SigE ee_th tp_th)
-    compile' (RangeGenExp bg Nothing st tp) = do
-      let Just elm = matchListType tp
-      elem_th <- compile elm
-      let bgE = return (TH.SigE (TH.LitE (TH.IntegerL bg)) elem_th)
-          stE = return (TH.LitE (TH.IntegerL st))
-      ee_th <- lift $ lift [| dvToSource (embedDistVar (enumFromByF $(bgE) $(stE))) |]
-      tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
-      return (TH.SigE ee_th tp_th)
-
-
-instance Compilable (CompiledPattern Rewritten) TH.Pat where
-  compile p = withCompileCtx p $ compile' p where
-    compile' (CompiledBasicPattern pat) =
-      return $ compileVarPat pat
-    compile' (CompiledCtorPat ctor patts _) =
-      do let patts_th = map compileVarPat patts
-         return $ mkCtorTHPat ctor patts_th
-    compile' (CompiledTuplePat patts _) =
-      return $ mkTupleTHPat $ map compileVarPat patts
-    compile' (CompiledLitPat (IntegerLit i) _) = return $ TH.LitP $ TH.IntegerL i
-    compile' (CompiledLitPat (RationalLit r) _) = return $ TH.LitP $ TH.RationalL r
-
-instance Compilable (CompiledVarPattern Rewritten) TH.Pat where
-  compile = return . compileVarPat
-
--- | Compile a pattern and add an explicit Haskell type signature around it
-compileRewrittenPatt :: CompiledPattern Rewritten -> Compile TH.Pat
-compileRewrittenPatt patt =
-  TH.SigP <$> compile patt <*> embedM (emitType False $ getTypeOf patt)
-
--- | Compile a pattern and add an explicit Haskell type signature around it
-compileTopPatt :: CompiledVarPattern Rewritten -> Compile TH.Pat
-compileTopPatt patt =
-  TH.SigP (compileVarPat patt) <$> embedM (emitType False (getTypeOf patt))
-
--- | Compile the pattern for the current model sub-case to a TH expression,
--- whose value is the return value for the current sub-case
-compileModelSubCasePatt :: Compile TH.Exp
-compileModelSubCasePatt = getModelSubCasePattern >>= helper where
-  helper :: Pattern Rewritten -> Compile TH.Exp
-  helper (CompiledBasicPattern pat) =
-    return (compileVarPatExp pat)
-  helper (CompiledCtorPat ctor patts _) =
-    return (mkADTCtorTHExp ctor $ map compileVarPatExp patts)
-  helper (CompiledTuplePat patts _) =
-    return (mkTupleTHExp (map compileVarPatExp patts))
-  helper (CompiledLitPat (IntegerLit i) _) = return $ TH.LitE $ TH.IntegerL i
-  helper (CompiledLitPat (RationalLit r) _) = return $ TH.LitE $ TH.RationalL r
-
-instance Compilable (Stmt Rewritten) [TH.Stmt] where
-  compile stmt = withCompileCtx stmt $ compile' stmt where
-    compile' ReturnStmt =
-      do case_patt_exp_th <- compileModelSubCasePatt
-         return [TH.NoBindS $
-                 applyTHExp (TH.VarE 'return) [case_patt_exp_th]]
-    compile' (SampleStmt lhs rhs body) =
-      -- Return lhs_patt <- rhs lhs_e; body
-      -- FIXME: put in explicit pattern-matches to get better errors!
-      do (lhs_e_th, lhs_patt_th) <- compile lhs
-         rhs_th <- compile rhs
-         body_th <- compile body
-         return $ (TH.BindS lhs_patt_th $ TH.AppE rhs_th lhs_e_th) : body_th
-    compile' (LetStmt x rhs body) =
-      do rhs_th <- compile rhs
-         body_th <- compile body
-         let x_th = TH.mkName $ T.unpack x
-         return $
-           TH.LetS [TH.ValD (TH.VarP x_th) (TH.NormalB rhs_th) []] : body_th
-    compile' (CaseStmt scrut cases) =
-      do scrut_th <- compile scrut
-         cases_th <- compile cases
-         return [TH.NoBindS $ TH.CaseE scrut_th cases_th]
-
 instance Compilable (GPriorStmt Rewritten) TH.Exp where
   compile stmt = withCompileCtx stmt $ compile' stmt where
     compile' (GPriorStmt lhs rhs) = do
       lhs_th <- compile lhs
       rhs_th <- compile rhs
-      embedM $
-        [| $(return rhs_th) <$> (liftIO (interpSource $(return lhs_th))) |]
-
-instance Compilable (ExpCase Rewritten) TH.Match where
-  compile (ExpCase patt body _ _) =
-    do patt_th <- compile patt
-       body_th <- compile body
-       return $ TH.Match patt_th (TH.NormalB body_th) []
-
-instance Compilable (StmtCase Rewritten) TH.Match where
-  compile (StmtCase patt body _) =
-    do patt_th <- compile patt
-       body_th <- compile body
-       return $ TH.Match patt_th (TH.NormalB $ TH.DoE body_th) []
-
-instance Compilable (FunCase Rewritten) TH.Clause where
-  compile (FunCase patts body) =
-    do patts_th <- mapM compileTopPatt patts
-       body_th <- compile body
-       return $ TH.Clause patts_th (TH.NormalB body_th) []
-
-compileBasicDistVarPatt :: CompiledVarPattern Rewritten -> Compile TH.Pat
-compileBasicDistVarPatt (VarCPat x tp) = do
-  tp_th <- compile tp
-  let dv_tp = TH.AppT (TH.ConT ''DistVar) tp_th
-  return $ TH.SigP (TH.VarP $ TH.mkName $ T.unpack x) (dv_tp)
-compileBasicDistVarPatt (WildCPat _) = embedM [p| _ |]
-
--- | Compile a Grappa pattern into a TH pattern over 'DistVar's
-compileDistVarPatt :: Pattern Rewritten -> Compile TH.Pat
-compileDistVarPatt (CompiledBasicPattern pat) =
-  compileBasicDistVarPatt pat
-compileDistVarPatt (CompiledCtorPat ctor patts _) =
-  do patts_th <- mapM compileBasicDistVarPatt patts
-     param_args_th <- forM patts_th $ \_ -> embedM [| VParam |]
-     embedM [p| (matchADTDistVar
-                 $(return $
-                   applyTHExp (TH.ConE $ ctor_th_name ctor) param_args_th) ->
-                 ($(return $ TH.ConP (ctor_th_name ctor) patts_th))) |]
-compileDistVarPatt (CompiledTuplePat patts _) =
-  do patts_th <- mapM compileBasicDistVarPatt patts
-     param_args_th <- forM patts_th $ \_ -> embedM [| VParam |]
-     embedM [p| (matchADTDistVar
-                 $(return $ mkTupleBodyTHExp param_args_th) ->
-                 ($(return $ mkTupleBodyTHPat patts_th))) |]
-compileDistVarPatt (CompiledLitPat _ (ADTType _ _)) =
-  error "compileDistVarPatt: literal pattern of ADT type!"
-compileDistVarPatt (CompiledLitPat (IntegerLit i) _) =
-  embedM $ [p| (matchAtomicDistVar $(TH.litE $ TH.IntegerL i) -> True) |]
-compileDistVarPatt (CompiledLitPat (RationalLit r) _) =
-  embedM $ [p| (matchAtomicDistVar $(TH.litE $ TH.RationalL r) -> True) |]
-
-
--- A model sub-case compiles to a MixtureCase expression
-instance Compilable (ModelSubCase Rewritten) TH.Exp where
-  compile (ModelSubCase vpatt maybe_prob_exp body) =
-    withModelSubCasePattern vpatt $
-    do vpatt_th <- compileDistVarPatt vpatt
-       prob_exp_th <- case maybe_prob_exp of
-         Just prob_exp -> compile prob_exp
-         Nothing -> return $ TH.LitE $ TH.IntegerL 1
-       body_th <- TH.DoE <$> compile body
-       embedM $
-         [|
-          MixtureCase
-          (\v -> case v of
-              $(return vpatt_th) -> Just $(return body_th)
-              _ -> Nothing)
-          $(return prob_exp_th)
-          |]
-
-instance Compilable (ModelCase Rewritten) TH.Clause where
-  compile (ModelCase patts sub_cases) =
-    do patts_th <- mapM compileRewrittenPatt patts
-       sub_cases_th <- compile sub_cases
-       body_th <-
-         case sub_cases_th of
-           [sub_case_th] ->
-             -- For a single sub-case, use mixtureDist1
-             embedM $ [| mixtureDist1 $(return sub_case_th) |]
-           _ ->
-             -- Otherwise, use mixtureDist
-             embedM $ [| mixtureDist $(return $ TH.ListE sub_cases_th) |]
-       return $ TH.Clause patts_th (TH.NormalB body_th) []
-
--- * Compile for interp__ variants
-
--- | Typeclass for @interp__@ forms, which might not produce template
--- haskell fragments of the same type as we did before!
-class CompileInterp a th | a -> th where
-  compileI :: a -> Compile th
-
-instance CompileInterp a th => CompileInterp [a] [th] where
-  compileI = mapM compileI
-
-instance CompileInterp Type TH.Type where
-  compileI tp = withCompileCtx tp $ embedM $ emitType True tp
-
-instance CompileInterp TopType TH.Type where
-  compileI top_tp = withCompileCtx top_tp $ embedM $ emitTopTypeI top_tp
-
-instance CompileInterp (Name Rewritten) TH.Exp where
-  compileI (LocalName x) = do
-    -- If this isn't set, then we're doing something wrong
-    Just curr <- compile_current_function <$> get
-    Just self <- compile_fix_parameter <$> get
-    return $ TH.VarE $ if curr == x then self else TH.mkName (T.unpack x)
-  compileI (GlobalName nm)
-    | gname_has_interp nm = return $ TH.VarE $ gname_th_interp_name nm
-    | otherwise =
-      -- NOTE: this case only happens for local Haskell variables bound outside
-      -- of a splice, and requires them to be embedded into the representation
-      return $ applyTHExp (TH.VarE 'embedRepr) [TH.VarE (gname_th_name nm)]
-        -- return $ applyTHExp (TH.ConE 'GExpr) [
-        -- applyTHExp (TH.VarE 'embedF) [TH.VarE (gname_th_name nm)]] -}
-  compileI (CtorName ctor) =
-    return $ mkCtorLamTHExpInterp ctor []
-
-instance CompileInterp (Exp Rewritten) TH.Exp where
-  compileI expr = withCompileCtx expr $ go expr where
-    go (NameExp nm _tp) = compileI nm
-    go (LiteralExp (IntegerLit i) _) = do
-      let exp_th = TH.AppE (TH.VarE 'interp__'integer)
-                           (TH.LitE (TH.IntegerL i))
-      return $ exp_th
-    go (LiteralExp (RationalLit r) _) = do
-      let exp_th = TH.AppE (TH.VarE 'interp__'rational)
-                           (TH.LitE (TH.RationalL r))
-      return $ exp_th
-    go (SigExp e _) = do
-      compileI e
-    go (AppExp f args _) = do
-      f_th <- compileI f
-      args_th <- compileI args
-      let goI x rs = (TH.VarE 'interp__'app) `TH.AppE` x `TH.AppE` rs
-      return $ foldl goI f_th args_th
-    go (TupleExp es _) = do
-      es_th <- compileI es
-      let tup_th = mkTupleBodyTHExp es_th
-      return $ TH.AppE (TH.VarE 'interp__'injTuple) tup_th
-    go (LetExp n _ lhs rhs _) = do
-      lhs_th <- compileI lhs
-      rhs_th <- compileI rhs
-      return $ TH.LetE [TH.ValD (TH.VarP $ TH.mkName $ T.unpack n)
-                        (TH.NormalB lhs_th) []] rhs_th
-    go (CaseExp scrut cases _) =
-      compileInterpCase scrut cases
-    go (ModelExp cases _) = do
-      compileSubCases cases
-    go (IfExp c t e _) = do
-      c_th <- compileI c
-      t_th <- compileI t
-      e_th <- compileI e
-      return $ applyTHExp (TH.VarE 'interp__'ifThenElse) [c_th, t_th, e_th]
-    go (FunExp (FunCase pats body) _) = do
-      let pats_th = map compileVarPat pats
-      body_th <- compileI body
-      return $ mkLamInterp pats_th body_th
-    go (ListExp enabled _) = notEnabled enabled
-    go (ParensExp enabled _) = notEnabled enabled
-    go (OpExp enabled _ _ _) = notEnabled enabled
-
--- ** Pattern-Matching Compilation
-
-class (CompileInterp body TH.Exp) => CaseType r body | r -> body where
-  getPattern :: r -> Pattern Rewritten
-  getBody    :: r -> body
-  getTupleProjector :: r -> TH.Name
-
-instance CaseType (ExpCase Rewritten) (Exp Rewritten) where
-  getPattern (ExpCase pat _ _ _) = pat
-  getBody (ExpCase _ body _ _) = body
-  getTupleProjector _ = 'interp__'projTuple
-
-instance CaseType (StmtCase Rewritten) (Stmt Rewritten) where
-  getPattern (StmtCase pat _ _) = pat
-  getBody (StmtCase _ body _) = body
-  getTupleProjector _ = 'interp__'projTupleStmt
-
-instance CaseType (ModelSubCase Rewritten) (Stmt Rewritten) where
-  getPattern (ModelSubCase pat _ _) = pat
-  getBody (ModelSubCase _ _ body) = body
-  getTupleProjector _ = 'interp__'projTupleStmt
-
-compileInterpCase :: (Show r, CaseType r b) => Exp Rewritten -> [r] -> Compile TH.Exp
-compileInterpCase scrut cases
-  | any isCtor cases = do
-      scrut_th <- compileI scrut
-      cases_th <- forM cases $ \ cs -> do
-        patt_th <- compileI (getPattern cs)
-        body_th <- compileI (getBody cs)
-        return $ TH.Match patt_th (TH.NormalB body_th) []
-      scr_var <- embedM $ TH.newName "scrut"
-      return $ applyTHExp (TH.VarE 'interp__'projADT)
-        [ scrut_th
-        , TH.LamE [TH.VarP scr_var] $
-            TH.CaseE (TH.VarE scr_var) cases_th
-        ]
-  | any isLit cases = do
-      scrut_th <- compileI scrut
-      compileLitMatch scrut_th cases
-  | [cs] <- cases
-  , CompiledTuplePat pats _ <- getPattern cs = do
-      scrut_th <- compileI scrut
-      let pat_th = map compileVarPat pats
-      body_th <- compileI (getBody cs)
-      return $ applyTHExp (TH.VarE (getTupleProjector cs))
-        [ scrut_th
-        , TH.LamE [mkTupleBodyTHPat pat_th] body_th
-        ]
-  | [] <- cases = error "Unexpected empty case alternatives list"
-  | otherwise = error ("Unsure how to deal with these pattern matches: " ++ show cases)
-  where isCtor (getPattern->CompiledCtorPat {}) = True
-        isCtor _ = False
-        isLit (getPattern->CompiledLitPat {}) = True
-        isLit _ = False
-
-compileLitMatch :: (Show r, CaseType r b) => TH.Exp -> [r] -> Compile TH.Exp
-compileLitMatch _ [cs] | CompiledBasicPattern _ <- getPattern cs =
-  compileI (getBody cs)
-compileLitMatch scrut (cs:rs) | CompiledLitPat l tp <- getPattern cs = do
-  l_th <- compileI (LiteralExp l tp :: Exp Rewritten)
-  c_th <- compileI (getBody cs)
-  e_th <- compileLitMatch scrut rs
-  let cmp = TH.VarE $ case l of
-        IntegerLit _  -> 'interp__'eqInteger
-        RationalLit _ -> 'interp__'eqRational
-  let cond_th = applyTHExp cmp [scrut, l_th]
-  return $ applyTHExp (TH.VarE 'interp__'ifThenElse) [cond_th, c_th, e_th]
-compileLitMatch _ (cs:_) =
-  error ("Unexpected pattern in compiling literal matches: " ++ show (getPattern cs))
-compileLitMatch _ [] =
-  error "Unexpected empty cases in compiling literal matches"
-
-instance CompileInterp (GPriorStmt Rewritten) TH.Exp where
-  compileI stmt = withCompileCtx stmt $ compile' stmt where
-    compile' (GPriorStmt lhs rhs) = do
-      lhs_th <- compile lhs
-      rhs_th <- compileI rhs
       embedM $ [| do { src <- liftIO (interp__'source $(return lhs_th))
                      ; return (interp__'sample $(return rhs_th) src interp__'return)
                      } |]
 
-instance CompileInterp (StmtCase Rewritten) TH.Match where
-  compileI (StmtCase patt body _) = do
-    patt_th <- compileI patt
-    body_th <- compileI body
+
+--
+-- ** Statements and Top-level Forms
+--
+
+instance Compilable (StmtCase Rewritten) TH.Match where
+  compile (StmtCase patt body _) = do
+    patt_th <- compile patt
+    body_th <- compile body
     return $ TH.Match patt_th (TH.NormalB body_th) []
 
-instance CompileInterp (ExpCase Rewritten) TH.Match where
-  compileI (ExpCase patt body _ _) = do
-    patt_th <- compileI patt
-    body_th <- compileI body
+instance Compilable (ExpCase Rewritten) TH.Match where
+  compile (ExpCase patt body _ _) = do
+    patt_th <- compile patt
+    body_th <- compile body
     return $ TH.Match patt_th (TH.NormalB body_th) []
 
-instance CompileInterp (CompiledPattern Rewritten) TH.Pat where
-  compileI p = withCompileCtx p $ compile' p where
+instance Compilable (CompiledPattern Rewritten) TH.Pat where
+  compile p = withCompileCtx p $ compile' p where
     compile' (CompiledBasicPattern pat) = return $ compileVarPat pat
     compile' (CompiledCtorPat ctor patts _) = do
       let patts_th = map compileVarPat patts
@@ -990,8 +774,8 @@ instance CompileInterp (CompiledPattern Rewritten) TH.Pat where
 -- well as the interp method needed to generate them, which should have type
 --
 -- (GVExpr repr a -> GStmt repr b) -> GStmt repr b
-instance CompileInterp (VExp Rewritten) ((TH.Exp, TH.Exp -> TH.Exp), [(TH.Name, TH.Exp)]) where
-  compileI ve = withCompileCtx ve $ runWriterT $ go ve where
+instance Compilable (VExp Rewritten) ((TH.Exp, TH.Exp -> TH.Exp), [(TH.Name, TH.Exp)]) where
+  compile ve = withCompileCtx ve $ runWriterT $ go ve where
     go :: VExp Rewritten -> WriterT [(TH.Name, TH.Exp)] Compile (TH.Exp, TH.Exp -> TH.Exp)
     go (VarVExp n True _) = do
       let expr = TH.VarE (TH.mkName ("v__" ++ T.unpack n))
@@ -1009,7 +793,7 @@ instance CompileInterp (VExp Rewritten) ((TH.Exp, TH.Exp -> TH.Exp), [(TH.Name, 
       return (TH.VarE n_th, TH.LamE [TH.VarP n_th])
     go (EmbedVExp e _) = do
       n_th <- lift $ embedM $ TH.newName "v__"
-      e_th <- lift $ compileI e
+      e_th <- lift $ compile e
       tell [(n_th, TH.AppE (TH.VarE 'interp__'vlift) e_th)]
       return (TH.VarE n_th, TH.LamE [TH.VarP n_th])
     go (SigVExp v _) = do
@@ -1032,7 +816,7 @@ instance CompileInterp (VExp Rewritten) ((TH.Exp, TH.Exp -> TH.Exp), [(TH.Name, 
                        (mkBody fresh_vars vars body)
                      ]
              )
-    go xs = error ("FIXME in CompileInterp VExp: " ++ show xs)
+    go xs = error ("FIXME in Compilable VExp: " ++ show xs)
 
 -- | Compile the pattern for the current model sub-case to a TH expression,
 -- whose value is the return value for the current sub-case
@@ -1052,15 +836,15 @@ compilePattInterp = getModelSubCasePattern >>= helper where
   helper (CompiledLitPat (IntegerLit i) _) = return $ TH.LitE $ TH.IntegerL i
   helper (CompiledLitPat (RationalLit r) _) = return $ TH.LitE $ TH.RationalL r
 
-instance CompileInterp (Stmt Rewritten) TH.Exp where
-  compileI stmt = withCompileCtx stmt $ go stmt where
+instance Compilable (Stmt Rewritten) TH.Exp where
+  compile stmt = withCompileCtx stmt $ go stmt where
     go ReturnStmt = do
       rs <- compilePattInterp
       return $ TH.AppE (TH.VarE 'interp__'return) rs
     go (SampleStmt lhs rhs body) = do
-      ((lhs_th, pat_th), vexp_vars_gens) <- compileI lhs
-      rhs_th  <- compileI rhs
-      body_th <- compileI body
+      ((lhs_th, pat_th), vexp_vars_gens) <- compile lhs
+      rhs_th  <- compile rhs
+      body_th <- compile body
       let body_lam = pat_th body_th
       return $
         flip (foldr $ \ (var, gen_exp) expr ->
@@ -1069,8 +853,8 @@ instance CompileInterp (Stmt Rewritten) TH.Exp where
         applyTHExp (TH.VarE 'interp__'sample) [rhs_th, lhs_th, body_lam]
     go (LetStmt x rhs body) = do
       let lhs_th = TH.VarP (TH.mkName (T.unpack x))
-      rhs_th <- compileI rhs
-      body_th <- compileI body
+      rhs_th <- compile rhs
+      body_th <- compile body
       return $ TH.LetE [TH.ValD lhs_th (TH.NormalB rhs_th) []] body_th
     go (CaseStmt e cs) =
       compileInterpCase e cs
@@ -1079,10 +863,10 @@ compileBranch :: ModelSubCase Rewritten -> Compile [TH.Exp]
 compileBranch (ModelSubCase (CompiledCtorPat _ ps _) prob_e stmt) = do
   prob <- case prob_e of
     Nothing -> return $ TH.AppE (TH.VarE 'interp__'rational) (TH.LitE (TH.RationalL 1.0))
-    Just e  -> compileI e
+    Just e  -> compile e
   let pat = CompiledTuplePat ps (TupleType [])
   pat_th <- compileVExprPatternInterp pat
-  body_th <- withModelSubCasePattern pat $ compileI stmt
+  body_th <- withModelSubCasePattern pat $ compile stmt
   body <- embedM [| interp__'mkDist $(return (pat_th body_th)) |]
   return [ prob, body ]
 compileBranch _ =
@@ -1161,20 +945,20 @@ compileVExprPatternInterp patt = withCompileCtx patt $ go patt where
     return $ TH.VarP $ TH.mkName $ ("v__" ++ T.unpack x)
   go' (WildCPat _) = return TH.WildP
 
-instance CompileInterp (ModelCase Rewritten) TH.Clause where
-  compileI (ModelCase patts sub_cases) = do
+instance Compilable (ModelCase Rewritten) TH.Clause where
+  compile (ModelCase patts sub_cases) = do
     patts_th <- mapM compileFunctionArgInterp patts
     sub_cases_th <- case sub_cases of
       [] -> fail "Error: no subcases in model"
       ModelSubCase (CompiledCtorPat (CtorInfo { ctor_type = typ }) _ _) _ _ : _ ->
         case typ of
-          TopType _ _ _ _ _ (ADTType info _) ->
+          TopType _ _ _ (ADTType info _) ->
             compileCtorCases info sub_cases
-          TopType _ _ _ _ _ t ->
+          TopType _ _ _ t ->
             fail ("Return type of constructor doesn't name an ADT:" ++ show t)
       [ModelSubCase pat _ ss] -> withModelSubCasePattern pat $ do
         pat_th <- compileVExprPatternInterp pat
-        body_th <- compileI ss
+        body_th <- compile ss
         return $ pat_th body_th
       cs -> fail ("Unsure how to handle " ++ show cs)
     body_th <-
@@ -1189,13 +973,13 @@ compileSubCases sub_cases = fmap (TH.AppE (TH.VarE 'interp__'mkDist)) $ case sub
   [] -> fail "Error: no subcases in model"
   (ModelSubCase (CompiledCtorPat (CtorInfo { ctor_type = typ }) _ _) _ _ : _) ->
         case typ of
-          TopType _ _ _ _ _ (ADTType info _) ->
+          TopType _ _ _ (ADTType info _) ->
             compileCtorCases info sub_cases
-          TopType _ _ _ _ _ t ->
+          TopType _ _ _ t ->
             fail ("Return type of constructor doesn't name an ADT: " ++ show t)
   [ModelSubCase pat _ ss] -> withModelSubCasePattern pat $ do
         pat_th <- compileVExprPatternInterp pat
-        body_th <- compileI ss
+        body_th <- compile ss
         return $ pat_th body_th
   cs -> fail ("Unsure how to handle " ++ show cs)
 
@@ -1210,15 +994,15 @@ mkInterpLam (WildCPat _:ps) e = do
   expr_th <- mkInterpLam ps e
   embedM [| interp__'lam (\ $(return pat) -> $(return expr_th)) |]
 
-instance CompileInterp (Decl Rewritten) [TH.Dec] where
-  compileI (ModelDecl {}) = do
+instance Compilable (Decl Rewritten) [TH.Dec] where
+  compile (ModelDecl {}) = do
     error "we should compile all ModelDecls to FunDecls via pattern-matching conversion"
 
-  compileI (FunDecl nm annot [FunCase pats expr]) = do
+  compile (FunDecl nm annot [FunCase pats expr]) = do
     let nm_th = TH.mkName $ T.unpack $ interpIdent nm
     Just fix_th <- compile_fix_parameter `fmap` get
-    tp_th <- compileI annot
-    expr_th <- compileI expr
+    tp_th <- compile annot
+    expr_th <- compile expr
     body_th <- mkInterpLam pats expr_th
     let body_fix_th =
           TH.AppE (TH.VarE 'interp__'fix)
@@ -1226,14 +1010,14 @@ instance CompileInterp (Decl Rewritten) [TH.Dec] where
     return [ TH.SigD nm_th tp_th
            , TH.FunD nm_th [TH.Clause [] (TH.NormalB body_fix_th) []]
            ]
-  compileI (FunDecl {}) =
+  compile (FunDecl {}) =
     error "Function with more than one top-level case (we should rewrite these away)"
 
-  compileI (SourceDecl _ _ _) = return []
+  compile (SourceDecl _ _ _) = return []
 
-  compileI (MainDecl (GPriorStmt src_expr model_expr)
+  compile (MainDecl (GPriorStmt src_expr model_expr)
             (InfMethod { infName = meth , infParams = es })) =
-    do model_th <- compileI model_expr
+    do model_th <- compile model_expr
        src_expr_th <- compile src_expr
        es_th <- compile es
        let mainExpr =
@@ -1242,33 +1026,9 @@ instance CompileInterp (Decl Rewritten) [TH.Dec] where
        embedM $ [d| main :: IO ()
                     main = $(return mainExpr) |]
 
-instance Compilable (Decl Rewritten) [TH.Dec] where
-  compile (ModelDecl {}) =
-    error "we should compile all ModelDecls to FunDecls via pattern-matching conversion"
-  compile d@(FunDecl nm annot cases) =
-    withLocalCompileEnv $ withCompileCtx d $ withCurrentFunction nm $
-    do let nm_th = TH.mkName $ T.unpack nm
-           nmI_th = TH.mkName $ T.unpack $ interpIdent nm
-       -- NOTE: see note above about compiling annot
-       tp_th <- compile annot
-       cases_th <- compile cases
-       addResolvedGName nm $ ResGName { gname_th_name = nm_th,
-                                        gname_th_interp_name = nmI_th,
-                                        gname_th_type = tp_th,
-                                        gname_type = annot,
-                                        gname_fixity = TH.defaultFixity,
-                                        gname_has_interp = True }
-       interp_th <- compileI d
-       return ([TH.SigD nm_th tp_th, TH.FunD nm_th cases_th] ++ interp_th)
-  compile (SourceDecl name _ src_exp) =
-    do src_exp_th <- compile src_exp
-       return [ TH.ValD (TH.VarP $ TH.mkName $ T.unpack name)
-                (TH.NormalB src_exp_th) [] ]
-  compile m@(MainDecl _ _) = compileI m
-
 
 --
--- 'gprior' compiler
+-- * Quasi-quoter for posterior expressions
 --
 
 compileGPostInterp :: String -> TH.Q TH.Exp
@@ -1278,7 +1038,7 @@ compileGPostInterp str = runCompile $ do
   let fixed_e = fixupOps resolved_e
   checked_e <- embedM $ typeCheck fixed_e ()
   rewritten <- embedM $ rewriteMatches checked_e
-  compileI rewritten
+  compile rewritten
 
 gpost :: TH.QuasiQuoter
 gpost = TH.QuasiQuoter
@@ -1289,25 +1049,8 @@ gpost = TH.QuasiQuoter
   }
 
 
-compileGPrior :: String -> TH.Q TH.Exp
-compileGPrior str = runCompile $ do
-  parsed_e <- embedM $ parseGPrior startPos str
-  resolved_e <- embedM $ resolve parsed_e
-  let fixed_e = fixupOps resolved_e
-  checked_e <- embedM $ typeCheck fixed_e ()
-  rewritten <- embedM $ rewriteMatches checked_e
-  compile rewritten
-
-gprior :: TH.QuasiQuoter
-gprior = TH.QuasiQuoter
-  { TH.quoteExp  = compileGPrior
-  , TH.quotePat  = const (error "No gprior quasi-quoter for patterns")
-  , TH.quoteType = const (error "No gprior quasi-quoter for types")
-  , TH.quoteDec  = const (error "No top-level gprior quasi-quoter")
-  }
-
 --
--- Top-level Compiler
+-- * Top-level Compiler
 --
 
 compileGrappa :: String -> TH.Q [TH.Dec]

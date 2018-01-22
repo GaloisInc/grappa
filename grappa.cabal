@@ -53,7 +53,7 @@ library
                      -- The modules of Grappa
                      , Language.Grappa.Rand.MWCRandM
                      , Language.Grappa.Distribution
-                     , Language.Grappa.Model
+                     -- , Language.Grappa.Model
 
                      -- Grappa Front-end
                      , Language.Grappa.GrappaInternals

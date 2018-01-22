@@ -24,7 +24,6 @@ import Control.Monad.Except
 
 import Language.Grappa.Frontend.AST
 import Language.Grappa.Frontend.DataSource (Unused)
-import Language.Grappa.Model
 import Language.Grappa.Interp
 import Language.Grappa.Distribution
 import Language.Grappa.GrappaInternals
@@ -87,12 +86,8 @@ mkTHArrowType :: [TH.Type] -> TH.Type -> TH.Type
 mkTHArrowType dom_tps ran_tp =
   foldr (\t1 t2 -> applyTHType TH.ArrowT [t1,t2]) ran_tp dom_tps
 
--- | Match a TH type of the form @tp1 -> ... -> tpn -> tp@, where @tp@ is either
--- @vtp -> 'Model' c tp@ or does not start with 'Model'
+-- | Match a TH type of the form @tp1 -> ... -> tpn -> tp@
 matchTHArrowType :: TH.Type -> ([TH.Type], TH.Type)
-matchTHArrowType tp@(TH.AppT (TH.AppT TH.ArrowT _)
-                     (TH.AppT (TH.AppT (TH.ConT model_tp) _) _))
-  | model_tp == ''Model = ([], tp)
 matchTHArrowType (TH.AppT (TH.AppT TH.ArrowT dom_tp) tp) =
   let (dom_tps, ret_tp) = matchTHArrowType tp in
   (dom_tp:dom_tps, ret_tp)
@@ -102,8 +97,7 @@ matchTHArrowType (TH.AppT (TH.AppT (TH.SigT tp1 _) tp2) tp3) =
   matchTHArrowType (TH.AppT (TH.AppT tp1 tp2) tp3)
 matchTHArrowType tp = ([], tp)
 
--- | Match a TH type @forall a1 ... an. ctx => tp1 -> ... -> tpn -> tp@, where
--- @tp@ is either @vtp -> 'Model' c tp@ or does not start with 'Model'
+-- | Match a TH type @forall a1 ... an. ctx => tp1 -> ... -> tpn -> tp@
 matchTHTopType :: TH.Type -> ([TH.TyVarBndr], TH.Cxt, [TH.Type], TH.Type)
 matchTHTopType (TH.ForallT tyvars ctx tp) =
   let (tyvars', ctx', dom_tps, ret_tp) = matchTHTopType tp in
@@ -184,14 +178,12 @@ matchTHTypeList _ = Nothing
 
 -- | The environments for emitting Grappa types to TH
 data EmitEnv = EmitEnv { emit_var_map :: Map TVar TH.Name,
-                         emit_dist_var :: TH.Name,
                          emit_repr_var :: TH.Name }
 
 -- | The default, empty 'EmitEnv'
-emptyEmitEnv :: TH.Name -> TH.Name -> EmitEnv
-emptyEmitEnv c repr = EmitEnv { emit_var_map = Map.empty,
-                                emit_dist_var = c,
-                                emit_repr_var = repr }
+emptyEmitEnv :: TH.Name -> EmitEnv
+emptyEmitEnv repr = EmitEnv { emit_var_map = Map.empty,
+                              emit_repr_var = repr }
 
 -- | Errors during emitting Grappa types to TH
 data EmitError = EmitErrUnknownTypeVar TVar
@@ -203,15 +195,11 @@ type Emit = StateT EmitEnv (ExceptT EmitError TH.Q)
 -- | Run an 'Emit' computation in the 'TH.Q' monad
 runEmit :: Emit a -> TH.Q (Either EmitError a)
 runEmit m =
-  do c_var <- TH.newName "c"
-     repr_var <- TH.newName "repr"
-     runExceptT $ fst <$> runStateT m (emptyEmitEnv c_var repr_var)
+  do repr_var <- TH.newName "repr"
+     runExceptT $ fst <$> runStateT m (emptyEmitEnv repr_var)
 
 instance SubMonad TH.Q Emit where
   embedM = lift . lift
-
-getDistVar :: Emit TH.Name
-getDistVar = emit_dist_var <$> get
 
 getReprVar :: Emit TH.Name
 getReprVar = emit_repr_var <$> get
@@ -234,28 +222,25 @@ emitTVar var =
        Just nm -> return $ TH.VarT nm
        Nothing -> throwError $ EmitErrUnknownTypeVar var
 
--- | Emit a Grappa type to TH. If the Boolean flag is 'True', emit the "interp"
--- version of the type, which uses the 'Dist' type in place of 'ModelDist'
-emitType :: Bool -> Type -> Emit TH.Type
-emitType _ (VarType var) = emitTVar var
-emitType iflag (BaseType nm tps) =
-  applyTHType (TH.ConT (tn_th_name nm)) <$> mapM (emitType iflag) tps
-emitType iflag (ADTType nm tps) =
+-- | Emit a Grappa type to TH
+emitType :: Type -> Emit TH.Type
+emitType (VarType var) = emitTVar var
+emitType (BaseType nm tps) =
+  applyTHType (TH.ConT (tn_th_name nm)) <$> mapM emitType tps
+emitType (ADTType nm tps) =
   -- Emit the type ADT (nm tps) Id
-  do tps_th <- mapM (emitType iflag) tps
+  do tps_th <- mapM emitType tps
      return $ applyTHType (TH.ConT ''ADT)
        [applyTHType (TH.ConT (tn_th_name nm)) tps_th]
-emitType iflag (TupleType tps) =
-  do tps_th <- mapM (emitType iflag) tps
+emitType (TupleType tps) =
+  do tps_th <- mapM emitType tps
      embedM $ [t| ADT (TupleF $(return $ mkTHTypeList tps_th)) |]
-emitType iflag (DistType tp) =
-  do th_tp <- emitType iflag tp
-     c_var <- emit_dist_var <$> get
-     if iflag then embedM $ [t| Dist $(return th_tp) |] else
-       embedM $ [t| ModelDist $(TH.varT c_var) $(return th_tp) |]
-emitType iflag (ArrowType tp1 tp2) =
-  applyTHType TH.ArrowT <$> mapM (emitType iflag) [tp1, tp2]
-emitType _ UnusedType = return (TH.ConT ''Unused)
+emitType (DistType tp) =
+  do th_tp <- emitType tp
+     embedM $ [t| Dist $(return th_tp) |]
+emitType (ArrowType tp1 tp2) =
+  applyTHType TH.ArrowT <$> mapM emitType [tp1, tp2]
+emitType UnusedType = return (TH.ConT ''Unused)
 
 
 -- True if the type contains no type variables; false otherwise
@@ -269,67 +254,34 @@ isConcreteType t = case t of
   ArrowType t1 t2 -> isConcreteType t1 && isConcreteType t2
   UnusedType      -> True
 
--- True if the class constraint is over a concrete type; false
--- otherwise
-isConcreteConstr :: ClassConstr -> Bool
-isConcreteConstr (NamedConstr _ tp) = isConcreteType tp
-
--- | Emit a class constraint to TH, where the Boolean flag controls whether to
--- use the "interp" version
-emitClassConstr :: Bool -> ClassConstr -> Emit TH.Type
-emitClassConstr iflag (NamedConstr nm tp) =
-  TH.AppT (TH.ConT $ constr_th_name nm) <$> emitType iflag tp
-
 -- | Emit a class constraint to TH
-emitClassConstrInterp :: InterpConstr -> Emit TH.Type
-emitClassConstrInterp (InterpConstr nm tp) = do
-  tps <- mapM (emitType True) tp
+emitClassConstr :: ClassConstr -> Emit TH.Type
+emitClassConstr (NamedConstr nm tp) =
+  TH.AppT (TH.ConT $ constr_th_name nm) <$> emitType tp
+emitClassConstr (InterpConstr nm tp) = do
+  tps <- mapM emitType tp
   repr <- getReprVar
   return $ foldl TH.AppT (TH.ConT $ constr_th_name nm) $ TH.VarT repr : tps
-emitClassConstrInterp (InterpADTConstr nm tps) = do
-  tps_th <- mapM (emitType True) tps
+emitClassConstr (InterpADTConstr nm tps) = do
+  tps_th <- mapM emitType tps
   repr <- getReprVar
   let nm_th = TH.ConT (tn_th_name nm)
       adt_tp_th = applyTHType nm_th tps_th
   return $ applyTHType (TH.ConT ''Interp__ADT) [TH.VarT repr, adt_tp_th]
 
--- | Emit a set of atomic distribution types @t1, ..., tn@ as a list of TH
--- constraints @[c t1, ..., c tn]@, where @c@ is the distribution set variable
-emitDistSet :: Set Type -> Emit [TH.Type]
-emitDistSet dist_set =
-  do c_var <- emit_dist_var <$> get
-     mapM (\tp -> TH.AppT (TH.VarT c_var) <$> emitType False tp) $
-       Set.toList dist_set
-
--- | Emit a top-level Grappa type to TH
-emitTopType :: TopType -> Emit TH.Type
-emitTopType (TopType tvars constrs _ dist_set dom_tps ran_tp) =
-  do c_var <- getDistVar
-     tvars_th <- mapM emitNewTVar tvars
-     constrs_th <-
-       mapM (emitClassConstr False) (filter (not . isConcreteConstr) $
-                                     L.nub constrs)
-     dist_set_th <- emitDistSet dist_set
-     dom_tps_th <- mapM (emitType False) dom_tps
-     ran_tp_th <- emitType False ran_tp
-     return $
-       TH.ForallT (map TH.PlainTV $ c_var : tvars_th)
-       (constrs_th ++ dist_set_th)
-       (mkTHArrowType dom_tps_th ran_tp_th)
+-- FIXME HERE NOW: rename emitTopTypeI -> emitTopType
 
 -- | Emit a top-level Grappa type to TH as an interpretation type
 emitTopTypeI :: TopType -> Emit TH.Type
-emitTopTypeI (TopType tvars constrs interp_constrs _ dom_tps ran_tp) =
+emitTopTypeI (TopType tvars constrs dom_tps ran_tp) =
   do tvars_th <- mapM emitNewTVar tvars
      repr <- getReprVar
-     constrs_th <- mapM (emitClassConstr True) (L.nub constrs)
-     interp_constrs_th <- mapM emitClassConstrInterp (L.nub interp_constrs)
+     constrs_th <- mapM emitClassConstr (L.nub constrs)
      let tvar_constrs_th =
            map (TH.AppT (TH.ConT ''GrappaType) . TH.VarT) tvars_th
      let repr_c = TH.AppT (TH.ConT ''ValidRepr) (TH.VarT repr)
-     let all_constrs =
-           repr_c : constrs_th ++ interp_constrs_th ++ tvar_constrs_th
-     tp_th <- emitType True (foldr ArrowType ran_tp dom_tps)
+     let all_constrs = repr_c : constrs_th ++ tvar_constrs_th
+     tp_th <- emitType (foldr ArrowType ran_tp dom_tps)
      return $ TH.ForallT (map TH.PlainTV (repr : tvars_th))
        all_constrs (applyTHType (TH.ConT ''GExpr) [TH.VarT repr, tp_th])
 
@@ -357,8 +309,6 @@ emptyIngestCache =
 data THTypeVarRole
   = RoleTVar TVar
     -- ^ A normal type variable
-  | RoleDistSet
-    -- ^ A type variable used as the first argument to the 'Model' type
   | RoleReprVar
     -- ^ A type variable used as the current representation
   deriving (Eq, Ord, Show)
@@ -366,16 +316,14 @@ data THTypeVarRole
 -- | The environment used for TH type ingest
 data IngestEnv = IngestEnv { ingest_cache :: IngestCache,
                              ingest_var_roles :: Map TH.Name THTypeVarRole,
-                             ingest_next_tvar :: TVar,
-                             ingest_dist_set :: Set Type }
+                             ingest_next_tvar :: TVar }
 
 -- | Build an ingest environment from a cache
 ingestEnvFromCache :: IngestCache -> IngestEnv
 ingestEnvFromCache cache =
   IngestEnv { ingest_cache = cache,
               ingest_var_roles = Map.empty,
-              ingest_next_tvar = TVar 1,
-              ingest_dist_set = Set.empty }
+              ingest_next_tvar = TVar 1 }
 
 -- | Context information about ingestion errors
 data IngestErrorContext = IngestCtxTopType TH.Type
@@ -398,7 +346,6 @@ data IngestError = IngErrorMalformedType TH.Type
                  | IngErrorMalformedConstr TH.Type
                  | IngErrorNonTVarAsTVar TH.Name THTypeVarRole
                  | IngErrorMultipleRoles TH.Name [THTypeVarRole]
-                 | IngErrorBadDist TH.Type
                  | IngErrorUnknownSupport TH.Type
                  | IngErrorContext IngestError IngestErrorContext
                  | IngErrorNonGExpr TH.Type
@@ -464,12 +411,6 @@ getTHVarTVar nm =
             return tvar
        Just role ->
          throwError $ IngErrorNonTVarAsTVar nm role
-
--- | Add a type to the current distribution set
-addToDistSet :: Type -> Ingest ()
-addToDistSet tp =
-  modify $ \env -> env { ingest_dist_set =
-                           Set.insert tp $ ingest_dist_set env }
 
 -- | Call 'TH.reify' in the 'Ingest' monad
 thReify :: TH.Name -> Ingest TH.Info
@@ -592,38 +533,11 @@ ingestTypeApp (TH.AppT _ _) _ =
 ingestTypeApp (TH.SigT _ _) _ =
   error "ingestTypeApp: unexpected SigT constructor!"
 
--- Ingest types of the form @Dist c a@
-ingestTypeApp (TH.ConT dist_nm) [TH.VarT model_var, th_tp]
-  | dist_nm == ''ModelDist
-  = do setTHVarRole model_var RoleDistSet
-       tp <- ingestType th_tp
-       return $ DistType tp
-
 -- Ingest types of the form @'Dist' a@
 ingestTypeApp (TH.ConT dist_nm) [th_tp]
   | dist_nm == ''Dist
   = do tp <- ingestType th_tp
        return $ DistType tp
-
--- Ingest types of the form @DistVar a -> Model c a@
-ingestTypeApp TH.ArrowT [(matchTHTypeApp ->
-                          (TH.ConT distvar_nm, [th_tp])),
-                         (matchTHTypeApp ->
-                          (TH.ConT model_nm,
-                           [TH.VarT model_var, th_tp']))]
-  | model_nm == ''Model && distvar_nm == ''DistVar && th_tp == th_tp'
-  = do setTHVarRole model_var RoleDistSet
-       tp <- ingestType th_tp
-       return $ DistType tp
-
--- Throw an error for other types of the form @... -> Model c b@
-ingestTypeApp TH.ArrowT args@(last ->
-                              (matchTHTypeApp ->
-                               (TH.ConT model_nm,
-                                [TH.VarT _model_var, _th_tp'])))
-  | model_nm == ''Model
-  = throwError $ IngErrorBadDist (applyTHType TH.ArrowT args)
-
 
 -- Ingest arrow types
 ingestTypeApp TH.ArrowT [th_tp1, th_tp2] =
@@ -700,95 +614,35 @@ ingestType tp =
   addIngestErrorContext (IngestCtxType tp) $
   uncurry ingestTypeApp $ matchTHTypeApp tp
 
--- | This should be simpler, because these types should be a lot more
--- abstract than they used to be. This also takes the
--- previously-ingested type and ensures that it corresponds.
-ingestTypeAppInterp :: TH.Type -> [TH.Type] -> Ingest Type
-ingestTypeAppInterp (TH.ConT dist_nm) [th_tp]
-  | dist_nm == ''Dist = do
-      tp <- ingestTypeInterp th_tp
-      return $ DistType tp
-ingestTypeAppInterp TH.ArrowT [th_tp1, th_tp2] = do
-  tp1 <- ingestTypeInterp th_tp1
-  tp2 <- ingestTypeInterp th_tp2
-  return $ ArrowType tp1 tp2
-
-ingestTypeAppInterp (TH.ConT adt_ctor) [(matchTHTypeApp ->
-                                   (TH.ConT adt_nm,
-                                    [(matchTHTypeList -> Just tps_th)]))]
-  | adt_ctor == ''ADT && adt_nm == ''TupleF
-  = do tps <- mapM ingestTypeInterp tps_th
-       return $ TupleType tps
-
-ingestTypeAppInterp
-  (TH.ConT adt_ctor)
-  [ (matchTHTypeApp -> (TH.ConT adt_nm, adt_args))
-  ] | adt_ctor == ''ADT
-  = do info <- ingestADTName adt_nm
-       tps <- mapM ingestTypeInterp adt_args
-       return $ ADTType info tps
-
-ingestTypeAppInterp (TH.ConT nm) args
-  | nm == ''GExpr =
-    let [_, tp] = args in ingestTypeInterp tp
-  | otherwise =
-  thReify nm >>= \th_info ->
-  case th_info of
-    TH.TyConI (TH.TySynD _ tyvars real_tp) ->
-      -- If nm is a type synonym, substitute into it and ingest again
-      ingestTypeInterp $
-        substTHType (Map.fromList $ zip (map thTyVarName tyvars) args) real_tp
-    _ ->
-      -- XXX be smarter about this case!
-      let handle _ = do
-            info <- ingestADTName nm
-            tps <- mapM ingestTypeInterp args
-            return $ ADTType info tps
-      in flip catchError handle $ do
-        (tn, _) <- ingestBaseTypeName nm
-        tps <- mapM ingestTypeInterp args
-        return $ BaseType tn tps
-
-ingestTypeAppInterp (TH.VarT nm) [] = do
-  tvar <- getTHVarTVar nm
-  return $ VarType tvar
-
-ingestTypeAppInterp tp args =
-  throwError $ IngErrorMalformedInterpType $ applyTHType tp args
-
-ingestTypeInterp :: TH.Type -> Ingest Type
-ingestTypeInterp tp =
-  addIngestErrorContext (IngestCtxInterpType tp) $
-  uncurry ingestTypeAppInterp $ matchTHTypeApp tp
-
--- | Ingest a TH type
-ingestTopTypeInterp :: TH.Type -> Ingest Type
-ingestTopTypeInterp t =
-  addIngestErrorContext (IngestCtxType t) $
-    case matchTHTypeApp t of
-      (tp, [_repr, arg])
-        | tp == TH.ConT ''GExpr ->
-            uncurry ingestTypeAppInterp $ matchTHTypeApp arg
-      _ ->
-        throwError $ IngErrorNonGExpr t
-
 
 --
 -- * Ingest a TH Type as a Top-Level Grappa Type
 --
 
--- | Ingest a TH constraint. This may return a Grappa 'ClassConstr', for normal
--- named constraints, or it may simply get internalized into the 'Ingest'
--- environment for TH constraints that represent membership in a dist set.
+-- | Ingest a TH constraint as a Grappa 'ClassConstr'
 ingestConstraint :: TH.Type -> Ingest (Maybe ClassConstr)
 
--- For a constraint c tp where c is a TH type variable, assume that c represents
--- a distribution set, and add tp to the current distribution set
-ingestConstraint (matchTHTypeApp -> (TH.VarT th_c, [th_tp])) =
-  do setTHVarRole th_c RoleDistSet
-     tp <- ingestType th_tp
-     addToDistSet tp
-     return Nothing
+-- Match constraints of the form Interp__ADT repr (nm tp1 ... tpn)
+ingestConstraint (matchTHTypeApp -> (TH.ConT nm, [TH.VarT repr_var, adt_tp]))
+  | nm == ''Interp__ADT
+  , (TH.ConT adt_nm_th, tps_th) <- matchTHTypeApp adt_tp
+  = do setTHVarRole repr_var RoleReprVar
+       adt_info <- ingestADTName adt_nm_th
+       tps <- mapM ingestType tps_th
+       return $ Just $ InterpADTConstr adt_info tps
+
+-- Match constraints of the form Interp__XXX repr tp1 ... tpn
+ingestConstraint (matchTHTypeApp -> (TH.ConT nm, (TH.VarT repr_var : tps_th)))
+  | L.isPrefixOf "Interp__" (TH.nameBase nm)
+  = do setTHVarRole repr_var RoleReprVar
+       tps <- mapM ingestType tps_th
+       return $ Just $ InterpConstr (ConstrInfo { constr_th_name = nm }) tps
+
+-- Match constraints of the form ValidRepr repr and return a Nothing
+ingestConstraint (matchTHTypeApp -> (TH.ConT validrepr_nm, [TH.VarT repr_var]))
+  | validrepr_nm == ''ValidRepr
+  = do setTHVarRole repr_var RoleReprVar
+       return Nothing
 
 -- Any other constraint is treated as a named constraint
 ingestConstraint (matchTHTypeApp -> (TH.ConT nm, [tp])) =
@@ -804,61 +658,6 @@ ingestConstraints :: [TH.Type] -> Ingest [ClassConstr]
 ingestConstraints tps = catMaybes <$> mapM ingestConstraint tps
 
 
--- | Ingest a TH constraint for the interpretation of a function
-ingestConstraintInterp :: TH.Type ->
-                          Ingest (Either InterpConstr (Maybe ClassConstr))
-
--- Match constraints of the form Interp__ADT repr (nm tp1 ... tpn)
-ingestConstraintInterp (matchTHTypeApp ->
-                        (TH.ConT nm, [TH.VarT repr_var, adt_tp]))
-  | nm == ''Interp__ADT
-  , (TH.ConT adt_nm_th, tps_th) <- matchTHTypeApp adt_tp
-  = do setTHVarRole repr_var RoleReprVar
-       adt_info <- ingestADTName adt_nm_th
-       tps <- mapM ingestType tps_th
-       return $ Left $ InterpADTConstr adt_info tps
-
--- Match constraints of the form Interp__XXX repr tp1 ... tpn
-ingestConstraintInterp (matchTHTypeApp ->
-                        (TH.ConT nm, (TH.VarT repr_var : tps_th)))
-  | L.isPrefixOf "Interp__" (TH.nameBase nm)
-  = do setTHVarRole repr_var RoleReprVar
-       tps <- mapM ingestType tps_th
-       return $ Left $ InterpConstr (ConstrInfo { constr_th_name = nm }) tps
-
--- Match constraints of the form ValidRepr repr and return a Nothing
-ingestConstraintInterp (matchTHTypeApp ->
-                        (TH.ConT validrepr_nm, [TH.VarT repr_var]))
-  | validrepr_nm == ''ValidRepr
-  = do setTHVarRole repr_var RoleReprVar
-       return $ Right Nothing
-
--- Other constraints get interpreted as normal constraints
-ingestConstraintInterp constr = Right <$> ingestConstraint constr
-
-
--- | Ingest a list of constraints for the interpretation of a function
-ingestConstraintsInterp :: [TH.Type] -> Ingest ([InterpConstr], [ClassConstr])
-ingestConstraintsInterp constrs_in =
-  do (interp_constrs, maybe_constrs) <-
-       partitionEithers <$> mapM ingestConstraintInterp constrs_in
-     return (interp_constrs, catMaybes maybe_constrs)
-
-
--- | Old-style ingest of a top-type
-oldIngestTopType :: TH.Type -> Ingest TopType
-oldIngestTopType top_tp_th =
-  withLocalIngestEnv $
-  addIngestErrorContext (IngestCtxTopType top_tp_th) $
-  do let (_, ctx, th_dom_tps, th_ran_tp) = matchTHTopType top_tp_th
-     constrs <- ingestConstraints ctx
-     dom_tps <- mapM ingestType th_dom_tps
-     ran_tp <- ingestType th_ran_tp
-     let tvars = Set.toList $ freeVars (dom_tps, ran_tp)
-     dist_set <- ingest_dist_set <$> get
-     return $ TopType tvars constrs [] dist_set dom_tps ran_tp
-
-
 -- | Ingest the TH types for an operator and its interpretation as a Grappa
 -- top-level type.
 --
@@ -866,37 +665,17 @@ oldIngestTopType top_tp_th =
 -- mostly ignores the type of the underlying operator, but it should do a
 -- double-check that the types match and that the constraints for the
 -- interpertation are a superset of those for the underlying operator.
-ingestTopType :: TH.Type -> TH.Type -> Ingest TopType
-ingestTopType old_top_tp_th interp_top_tp_th =
+ingestTopType :: TH.Type -> Ingest TopType
+ingestTopType top_tp_th =
   withLocalIngestEnv $
-  addIngestErrorContext (IngestCtxTopType interp_top_tp_th) $
-  case matchTHTopInterpType interp_top_tp_th of
+  addIngestErrorContext (IngestCtxTopType top_tp_th) $
+  case matchTHTopInterpType top_tp_th of
     Just (_, ctx, repr_var, th_dom_tps, th_ran_tp) -> do
       setTHVarRole repr_var RoleReprVar
-      (interp_constrs, constrs1) <- ingestConstraintsInterp ctx
+      constrs <- ingestConstraints ctx
       dom_tps <- mapM ingestType th_dom_tps
       ran_tp <- ingestType th_ran_tp
-      dist_set1 <- ingest_dist_set <$> get
       let tvars = Set.toList $ freeVars (dom_tps, ran_tp)
-      -- NOTE: we need to ingest all the non-interp constraints, for two
-      -- reasons: we need to get the dist-set; and for, e.g., the (+) operator,
-      -- we will only get the Interp__'plus class, not its super-classes (such
-      -- as the Num class). Both of these are only needed for the non-interp
-      -- compilation. In order to ingest these old-style non-interp constraints,
-      -- we ingest the old-style top type, syntactically match it against the
-      -- new type, and use the resulting renaming to ingest its constraints
-      TopType _ old_constrs _ old_dist_set old_dom_tps old_ran_tp <-
-        oldIngestTopType old_top_tp_th
-      let old_body = mkArrowType old_dom_tps old_ran_tp
-          interp_body = mkArrowType dom_tps ran_tp
-      ren <-
-        case synMatch old_body interp_body of
-          Nothing -> throwError $ IngErrorDifferentTypes old_body interp_body
-          Just ren -> return ren
-      let constrs2 = rename ren old_constrs
-      let dist_set2 = Set.map (rename ren) old_dist_set
-      let constrs = L.nub (constrs1 ++ constrs2)
-      let dist_set = Set.union dist_set1 dist_set2
-      return $ TopType tvars constrs interp_constrs dist_set dom_tps ran_tp
+      return $ TopType tvars (L.nub constrs) dom_tps ran_tp
     Nothing ->
-      throwError $ IngErrorMalformedTopInterpType interp_top_tp_th
+      throwError $ IngErrorMalformedTopInterpType top_tp_th

@@ -26,7 +26,7 @@ import Language.Grappa.Frontend.AST
 import Language.Grappa.Frontend.IngestEmitType
 import Language.Grappa.Interp
 import Language.Grappa.Inference
-import Language.Grappa.Distribution
+
 
 --
 -- * Type Errors
@@ -116,8 +116,6 @@ data TCEnv =
   TCEnv { tc_tvar_map :: Map TVar Type,
           tc_next_tvar :: TVar,
           tc_constrs :: Set ClassConstr,
-          tc_constrs_interp :: Set InterpConstr,
-          tc_dist_set :: DistSet,
           tc_unsampled_vars :: Set Ident,
           tc_ctx :: Map Ident Type,
           tc_debug_handle :: Maybe Handle }
@@ -127,8 +125,6 @@ emptyTCEnv :: Maybe Handle -> TCEnv
 emptyTCEnv debugH = TCEnv { tc_tvar_map = Map.empty,
                             tc_next_tvar = TVar 1,
                             tc_constrs = Set.empty,
-                            tc_constrs_interp = Set.empty,
-                            tc_dist_set = Set.empty,
                             tc_unsampled_vars = Set.empty,
                             tc_ctx = Map.empty,
                             tc_debug_handle = debugH }
@@ -206,24 +202,6 @@ setTVarUnsafe var val =
 getConstrs :: TypeCheck (Set ClassConstr)
 getConstrs = tc_constrs <$> get
 
--- | Get the current set of named constraints on types
-getInterpConstrs :: TypeCheck (Set InterpConstr)
-getInterpConstrs = tc_constrs_interp <$> get
-
--- | Get the current 'DistSet'
-getDistSet :: TypeCheck DistSet
-getDistSet = tc_dist_set <$> get
-
--- | Add a type to the current 'DistSet'
-insertDistSet :: Type -> TypeCheck ()
-insertDistSet tp =
-  modify $ \env -> env { tc_dist_set = Set.insert tp $ tc_dist_set env }
-
--- | Union a 'DistSet' into the current 'DistSet'
-unionDistSet :: DistSet -> TypeCheck ()
-unionDistSet dset =
-  modify $ \env -> env { tc_dist_set = Set.union dset $ tc_dist_set env }
-
 -- | Look up the type of a (term, not type) variable, along with a flag stating
 -- whether it is in the current set of unsampled variables
 lookupVarType :: Ident -> TypeCheck (Maybe Type, Bool)
@@ -299,31 +277,25 @@ distSupportType dist_tp =
 -- * Instantiating Top Types
 --
 
--- | Ensure that a type satisfies a given constraint
+-- | Ensure that a given type-level constraint is satisfied
 ensureClassConstr :: ClassConstr -> TypeCheck ()
 ensureClassConstr constr =
   modify $ \env -> env { tc_constrs = Set.insert constr $ tc_constrs env }
 
--- | Call 'ensureClassConstr' with a TH name
+-- | Ensure a normal, unary, named type constraint
 ensureNamedConstr :: TH.Name -> Type -> TypeCheck ()
 ensureNamedConstr nm tp = ensureClassConstr (NamedConstr (ConstrInfo nm) tp)
 
--- | Ensure that an interpretation constraint is satisfied
-ensureInterpConstr :: InterpConstr -> TypeCheck ()
-ensureInterpConstr constr =
-  modify $ \env ->
-  env { tc_constrs_interp = Set.insert constr $ tc_constrs_interp env }
-
--- | Call 'ensureInterpConstr' with a TH name
+-- | Ensure an @Interp__XXX@ constraint
 ensureNamedInterpConstr :: TH.Name -> [Type] -> TypeCheck ()
 ensureNamedInterpConstr nm tps =
-  ensureInterpConstr (InterpConstr (ConstrInfo nm) tps)
+  ensureClassConstr (InterpConstr (ConstrInfo nm) tps)
 
--- | Ensure that an interpretation constraint for an ADT type is satisfied
+-- | Ensure an @Interp__ADT@ constraint
 ensureADTInterpConstr :: Type -> TypeCheck ()
 ensureADTInterpConstr tp = zonk tp >>= helper where
   helper (ADTType nm args) =
-    ensureInterpConstr (InterpADTConstr nm args)
+    ensureClassConstr (InterpADTConstr nm args)
   helper bad_tp =
     error $ "ensureADTInterpConstr called on a non-ADT type:" ++ show bad_tp
 
@@ -352,13 +324,13 @@ ensureTypeHasLitEq (IntegerLit _) tp = do
   ensureNumTp tp
   ensureNamedInterpConstr ''Interp__'integer [tp]
   ensureNamedInterpConstr ''Interp__'eqInteger [tp]
-  ensureInterpConstr (InterpConstr (ConstrInfo ''Interp__'ifThenElse) [])
+  ensureClassConstr (InterpConstr (ConstrInfo ''Interp__'ifThenElse) [])
 ensureTypeHasLitEq (RationalLit _) tp = do
   ensureNamedConstr ''Eq tp
   ensureFractionalTp tp
   ensureNamedInterpConstr ''Interp__'rational [tp]
   ensureNamedInterpConstr ''Interp__'eqRational [tp]
-  ensureInterpConstr (InterpConstr (ConstrInfo ''Interp__'ifThenElse) [])
+  ensureClassConstr (InterpConstr (ConstrInfo ''Interp__'ifThenElse) [])
 
 -- -- | Ensure that the given type supports the 'Eq' typeclass
 -- ensureTypeHasEq :: Type -> TypeCheck ()
@@ -377,11 +349,9 @@ buildTVRenaming vars =
 
 -- | Instantiate a 'TopType' with fresh (v)type variables
 instantiateTopType :: TopType -> TypeCheck ([Type], Type)
-instantiateTopType (TopType tvars constrs iconstrs dset arg_tps ret_tp) =
-  do unionDistSet dset
-     ren <- buildTVRenaming tvars
+instantiateTopType (TopType tvars constrs arg_tps ret_tp) =
+  do ren <- buildTVRenaming tvars
      mapM_ (ensureClassConstr . rename ren) constrs
-     mapM_ (ensureInterpConstr . rename ren) iconstrs
      return (rename ren arg_tps, rename ren ret_tp)
 
 
@@ -535,8 +505,6 @@ instance Zonkable Type where
 
 instance Zonkable ClassConstr where
   zonk' (NamedConstr nm tp) = NamedConstr nm <$> zonk' tp
-
-instance Zonkable InterpConstr where
   zonk' (InterpConstr nm tps) = InterpConstr nm <$> zonk' tps
   zonk' (InterpADTConstr nm tps) = InterpADTConstr nm <$> zonk' tps
 
@@ -870,7 +838,7 @@ instance TypeCheckable Type Exp where
     c_t <- typeCheck c boolType
     t_t <- typeCheck t tp
     e_t <- typeCheck e tp
-    ensureInterpConstr (InterpConstr (ConstrInfo ''Interp__'ifThenElse) [])
+    ensureClassConstr (InterpConstr (ConstrInfo ''Interp__'ifThenElse) [])
     return (IfExp c_t t_t e_t tp)
   typeCheck' (FunExp (FunCase pats e) _) tp = do
     (args_tp, ret_tp) <- exposeArrowType (length pats) tp
@@ -918,7 +886,7 @@ instance TypeCheckable Type Exp where
     c_t <- typeCheck c boolType
     (t_t, tp) <- typeInfer t
     e_t <- typeCheck e tp
-    ensureInterpConstr (InterpConstr (ConstrInfo ''Interp__'ifThenElse) [])
+    ensureClassConstr (InterpConstr (ConstrInfo ''Interp__'ifThenElse) [])
     return (IfExp c_t t_t e_t tp, tp)
   typeInfer' (FunExp (FunCase pats e) _) = do
     patsInf <- mapM typeInferPatt pats
@@ -1167,9 +1135,7 @@ addSubCaseMixtureDists [ModelSubCase p _ _] =
   addCtorConstraints p
 addSubCaseMixtureDists cs =
   -- Otherwise, we add the Categorical distribution
-  do cat_dist_type <- embedM $ ingestType $ TH.ConT ''Categorical
-     mapM_ addMixtureConstraints [ p | ModelSubCase p _ _ <- cs ]
-     insertDistSet cat_dist_type
+  mapM_ addMixtureConstraints [ p | ModelSubCase p _ _ <- cs ]
 
 introduceADTConstraints :: Pattern Typed -> TypeCheck ()
 introduceADTConstraints (CtorPat _ ps t) = do
@@ -1428,18 +1394,13 @@ buildTopType arg_tps_in ret_tp_in =
     -- First, get all the components of our top type and zonk them
     arg_tps <- zonk arg_tps_in
     ret_tp <- zonk ret_tp_in
-    dset_in <- getDistSet
-    dset <- Set.fromList <$> mapM zonk (Set.toList dset_in)
     -- Get all the constraints and zonk them
     -- FIXME: simplify type constraints by looking up instances that match the
     -- head of the type to which the constraint is applied
     constrs_in <- Set.toList <$> getConstrs
     constrs <- mapM zonk constrs_in
-    interp_constrs_in <- Set.toList <$> getInterpConstrs
-    interp_constrs <- mapM zonk interp_constrs_in
     let vars = freeVars (arg_tps, ret_tp)
-    return $
-      TopType (Set.toList vars) constrs interp_constrs dset arg_tps ret_tp
+    return $ TopType (Set.toList vars) constrs arg_tps ret_tp
 
 
 instance TypeCheckable () Decl where

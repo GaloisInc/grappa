@@ -24,7 +24,6 @@ import Control.Monad.Except
 import Language.Grappa.Frontend.AST
 import Language.Grappa.Frontend.IngestEmitType
 import Language.Grappa.Inference
-import Language.Grappa.Interp
 
 
 --
@@ -101,10 +100,11 @@ instance SubMonad Ingest Resolve where
            modify (\env -> env { resolve_ingest_cache = icache' }) >>
            return res
 
+
 -- | Ingest a 'TopType' in the 'Resolve' monad
-rIngestTopType :: Ident -> TH.Type -> TH.Type -> Resolve TopType
-rIngestTopType nm th_tp th_tpIn =
-  embedM $ withName (T.unpack nm) $ ingestTopType th_tp th_tpIn
+rIngestTopType :: Ident -> TH.Type -> Resolve TopType
+rIngestTopType nm th_tp =
+  embedM $ withName (T.unpack nm) $ ingestTopType th_tp
 
 
 --
@@ -161,8 +161,6 @@ instance TypeResolvable ClassConstrP where
     do th_nm <- resolveTypeName nm
        tp_res <- tpResolve tp
        return $ NamedConstr (ConstrInfo { constr_th_name = th_nm }) tp_res
-
-instance TypeResolvable InterpConstrP where
   tpResolve (InterpConstr nm tps) =
     do th_nm <- resolveTypeName nm
        tp_res <- mapM tpResolve tps
@@ -174,15 +172,11 @@ instance TypeResolvable InterpConstrP where
        return $ InterpADTConstr tn tp_res
 
 instance TypeResolvable TopTypeP where
-  tpResolve (TopType vars constrs interpCs dist_set dom_tps ran_tp) =
+  tpResolve (TopType vars constrs dom_tps ran_tp) =
     do constrs_res <- mapM tpResolve constrs
-       interpCs_res <- mapM tpResolve interpCs
-       dist_set_res <-
-         foldM (\ds tp -> flip Set.insert ds <$> tpResolve tp)
-         Set.empty dist_set
        dom_tps_res <- mapM tpResolve dom_tps
        ran_tp_res <- tpResolve ran_tp
-       return $ TopType vars constrs_res interpCs_res dist_set_res dom_tps_res ran_tp_res
+       return $ TopType vars constrs_res dom_tps_res ran_tp_res
 
 -- | Resolve a type annotation on a declaration
 resolveDeclTypeAnnot :: DeclTypeAnnot Raw ->
@@ -190,71 +184,53 @@ resolveDeclTypeAnnot :: DeclTypeAnnot Raw ->
 resolveDeclTypeAnnot (Just top_tp) = Just <$> tpResolve top_tp
 resolveDeclTypeAnnot Nothing = return Nothing
 
--- | Resolve an 'Ident' into a global TH name with info
-resolveNameWithInfo :: Ident -> Resolve (TH.Name, TH.Info)
-resolveNameWithInfo x =
-  do maybe_th_nm <- embedM $ TH.lookupValueName $ T.unpack x
-     th_nm <- case maybe_th_nm of
-       Just th_nm -> return th_nm
-       Nothing -> throwError $ ResErrorUnbound x
-     -- we hack around the lack of reify info about locals by
-     -- generating a new fresh type for them
-     fakeType <- embedM $ TH.newName "typ"
-     let fakeInfo = TH.VarI th_nm (TH.VarT fakeType) Nothing
-     th_info <- embedM $ (return fakeInfo `TH.recover` TH.reify th_nm)
-     return (th_nm, th_info)
 
--- | Resolve an 'Ident' into a global TH name with info
-resolveInterpNameWithInfo :: Ident -> Resolve (TH.Name, TH.Info, Bool)
-resolveInterpNameWithInfo x =
-  do maybe_th_nm <- embedM $ TH.lookupValueName $ T.unpack (interpIdent x)
-     (th_nm, hasInterp) <- case maybe_th_nm of
-       Just th_nm -> return (th_nm, True)
-       Nothing -> do
-         maybe_other_nm <- embedM $ TH.lookupValueName $ T.unpack x
-         case maybe_other_nm of
-           Just th_nm -> return (th_nm, False)
-           Nothing -> throwError $ ResErrorUnbound (interpIdent x)
-     fakeType <- embedM $ TH.newName "typ"
-     let gexprType = TH.AppT (TH.AppT (TH.ConT ''GExpr) (TH.VarT (TH.mkName "repr")))
-                             (TH.VarT fakeType)
-     let fakeInfo = TH.VarI th_nm gexprType Nothing
-     th_info <- embedM $ return fakeInfo `TH.recover` TH.reify th_nm
-     return (th_nm, th_info, hasInterp)
-
--- | Resolve an 'Ident' into a global TH value
+-- | Resolve an 'Ident' into a global Grappa name
 resolveGName :: Ident -> Resolve ResGName
 resolveGName x =
   memoizeResolve resolve_gnames (\c m -> c { resolve_gnames = m }) x $
-  do (th_nm, th_info) <- resolveNameWithInfo x
-     th_tp <-
-       case th_info of
-         THCompat.VarI _ tp_th _ -> return tp_th
-         THCompat.ClassOpI _ tp_th _ -> return tp_th
-         _ -> throwError $ ResErrorNotDefVar th_nm
-     (th_nmIn, th_infoIn, thHasInterp) <- resolveInterpNameWithInfo x
-     tp_thIn <-
-       case th_infoIn of
-         THCompat.VarI _ tp_th _ -> return tp_th
-         THCompat.ClassOpI _ tp_th _ -> return tp_th
-         _ -> error "[unreachable]"
-     maybe_fixity <- embedM $ THCompat.reifyFixity th_nm
-     let fixity = case maybe_fixity of
-           Just f  -> f
-           Nothing -> TH.defaultFixity
-     top_tp <- rIngestTopType x th_tp tp_thIn
-     return $ ResGName { gname_th_name = th_nm,
-                         gname_th_interp_name = th_nmIn,
-                         gname_th_type = th_tp,
-                         gname_type = top_tp,
-                         gname_fixity = fixity,
-                         gname_has_interp = thHasInterp }
+  do
+    -- Step 1: lookup the "interp__XXX" TH name
+    maybe_th_nm <- embedM $ TH.lookupValueName $ T.unpack (interpIdent x)
+    th_nm <- case maybe_th_nm of
+      Just th_nm -> return th_nm
+      Nothing -> throwError $ ResErrorUnbound x
+
+    -- Step 2: reify the "interp__XXX" TH name to get its type
+    th_info <- embedM $ TH.reify th_nm
+    th_tp <-
+      case th_info of
+        THCompat.VarI _ tp_th _ -> return tp_th
+        THCompat.ClassOpI _ tp_th _ -> return tp_th
+        _ -> error "[unreachable]"
+    top_tp <- rIngestTopType x th_tp
+
+    -- Step 3: get the operator fixity of the Haskell name "XXX" if possible
+    maybe_fixity <-
+      embedM $ TH.recover (return Nothing) $
+      do maybe_raw_th_nm <- TH.lookupValueName $ T.unpack x
+         case maybe_raw_th_nm of
+           Just raw_th_nm -> THCompat.reifyFixity raw_th_nm
+           Nothing -> return Nothing
+    let fixity = case maybe_fixity of
+          Just f  -> f
+          Nothing -> TH.defaultFixity
+
+    -- Finally: return the resulting global name
+    return $ ResGName { gname_ident = x,
+                        gname_th_name = th_nm,
+                        gname_type = top_tp,
+                        gname_fixity = fixity }
 
 -- | Resolve an 'Ident' into a constructor
 resolveCtor :: Ident -> Resolve CtorInfo
 resolveCtor x =
   memoizeResolve resolve_ctors (\c m -> c { resolve_ctors = m }) x $
-  do (th_nm, th_info) <- resolveNameWithInfo x
+  do maybe_th_nm <- embedM $ TH.lookupValueName $ T.unpack x
+     th_nm <- case maybe_th_nm of
+       Just th_nm -> return th_nm
+       Nothing -> throwError $ ResErrorUnbound x
+     th_info <- embedM $ TH.reify th_nm
      th_type_nm <-
        case th_info of
          THCompat.DataConI _ _ th_adt_nm -> return th_adt_nm

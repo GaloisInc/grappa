@@ -277,17 +277,11 @@ instance (Show (TypeVar p), Show (TypeName p)) => Show (TypeP p) where
     "(" ++ show dom_tp ++ " -> " ++ show ran_tp ++ ")"
   show UnusedType = "[Unused]"
 
--- | Ordinary Grappa typeclass constraints
-data ClassConstrP p = NamedConstr (ConstrName p) (TypeP p)
-
-deriving instance TypePhaseC Eq p => Eq (ClassConstrP p)
-deriving instance TypePhaseC Ord p => Ord (ClassConstrP p)
-deriving instance TypePhaseC Show p => Show (ClassConstrP p)
-
--- | Constraints on interpretations that can or cannot be used for a particular
--- Grappa program
-data InterpConstrP p
-  = InterpConstr (ConstrName p) [TypeP p]
+-- | Type-level constraints, similar to Haskell typeclasses
+data ClassConstrP p
+  = NamedConstr (ConstrName p) (TypeP p)
+    -- ^ An ordinary, unary, named typeclass constraint on a Grappa type
+  | InterpConstr (ConstrName p) [TypeP p]
     -- ^ Constraint stating that a Haskell function or operator can be
     -- interpreted at the given type(s) in the current representation. The name
     -- used is of the form @Interp__XXX@ where @XXX@ is a conversion of the
@@ -296,16 +290,12 @@ data InterpConstrP p
     -- ^ An 'Interp__ADT' constraint, stating that the given Grappa ADT type can
     -- be interpreted in a particular representation
 
-deriving instance TypePhaseC Eq p => Eq (InterpConstrP p)
-deriving instance TypePhaseC Ord p => Ord (InterpConstrP p)
-deriving instance TypePhaseC Show p => Show (InterpConstrP p)
-
--- | Distribution sets (FIXME: document this!)
-type DistSetP p = Set (TypeP p)
+deriving instance TypePhaseC Eq p => Eq (ClassConstrP p)
+deriving instance TypePhaseC Ord p => Ord (ClassConstrP p)
+deriving instance TypePhaseC Show p => Show (ClassConstrP p)
 
 -- | Top-level types (FIXME: document this!)
-data TopTypeP p =
-  TopType [TVar] [ClassConstrP p] [InterpConstrP p] (DistSetP p) [TypeP p] (TypeP p)
+data TopTypeP p = TopType [TVar] [ClassConstrP p] [TypeP p] (TypeP p)
 
 deriving instance TypePhaseC Eq p => Eq (TopTypeP p)
 deriving instance TypePhaseC Ord p => Ord (TopTypeP p)
@@ -678,16 +668,13 @@ instance PP.Pretty CtorInfo where
     PP.text (TH.pprint n)
 
 instance PP.Pretty ResGName where
-  pretty (ResGName { gname_th_name = n }) =
-    PP.text (TH.nameBase n)
+  pretty n = PP.pretty (T.unpack $ gname_ident n)
 
 instance PP.Pretty TVar where
   pretty (TVar i) = PP.char 'x' <> PP.integer (fromIntegral i)
 
 instance TypePhaseC PP.Pretty p  => PP.Pretty (ClassConstrP p) where
   pretty (NamedConstr n t) = PP.pretty n <+> PP.pretty t
-
-instance TypePhaseC PP.Pretty p  => PP.Pretty (InterpConstrP p) where
   pretty (InterpConstr n t) =
     PP.pretty n <+> PP.text "repr" <+> PP.sep (map PP.pretty t)
   pretty (InterpADTConstr n t) =
@@ -709,10 +696,9 @@ instance TypePhaseC PP.Pretty p => PP.Pretty (TypeP p) where
   pretty UnusedType = PP.text "?unused"
 
 instance (TypePhaseC PP.Pretty p, TypePhaseC Ord p) => PP.Pretty (TopTypeP p) where
-  pretty (TopType vs cs cs' _ds ps p) =
+  pretty (TopType vs cs ps p) =
     PP.sep [ PP.sep [ PP.text "forall", PP.hsep (map PP.pretty vs), PP.text "."]
            , PP.parens (commaSep $ nub $ sort cs) <+> PP.text "=>"
-           , PP.parens (commaSep $ nub $ sort cs') <+> PP.text "=>"
            , foldr arrow (PP.pretty p) ps
            ]
     where
@@ -817,14 +803,8 @@ data ConstrInfo = ConstrInfo { constr_th_name :: TH.Name }
 -- | Shorthand for resolved types
 type Type = TypeP TypedType
 
--- | Shorthand for resolved named constraints
+-- | Shorthand for resolved type-level constraints
 type ClassConstr = ClassConstrP TypedType
-
--- | Shorthand for resolved interp__ constraints
-type InterpConstr = InterpConstrP TypedType
-
--- | Shorthand for resolved 'DistSetP's
-type DistSet = DistSetP TypedType
 
 -- | Shorthand for resolved top types
 type TopType = TopTypeP TypedType
@@ -975,7 +955,7 @@ freshType = VarType <$> freshTVar
 
 -- | Get the arity of a top-level type
 topTypeArity :: TopTypeP p -> Int
-topTypeArity (TopType _ _ _ _ arg_tps _) = length arg_tps
+topTypeArity (TopType _ _ arg_tps _) = length arg_tps
 
 
 --
@@ -1006,6 +986,8 @@ instance FreeVars Type where
 
 instance FreeVars ClassConstr where
   freeVars' dir (NamedConstr _ tp) = freeVars' dir tp
+  freeVars' dir (InterpConstr _ tps) = freeVars' dir tps
+  freeVars' dir (InterpADTConstr _ tps) = freeVars' dir tps
 
 instance (FreeVars a, FreeVars b) => FreeVars (a,b) where
   freeVars' dir (a,b) = freeVars' dir a >> freeVars' dir b
@@ -1116,8 +1098,6 @@ instance Renameable Type where
 
 instance Renameable ClassConstr where
   rename ren (NamedConstr cn tp) = NamedConstr cn $ rename ren tp
-
-instance Renameable InterpConstr where
   rename ren (InterpConstr cn tps) = InterpConstr cn $ map (rename ren) tps
   rename ren (InterpADTConstr n tps) = InterpADTConstr n $ map (rename ren) tps
 
@@ -1167,16 +1147,20 @@ synMatchList _ _ = Nothing
 --
 
 -- | The type of resolved global (term) names
-data ResGName = ResGName { gname_th_name :: TH.Name,
-                           gname_th_interp_name :: TH.Name,
-                           gname_th_type :: TH.Type,
-                           gname_type :: TopType,
-                           gname_fixity :: TH.Fixity,
-                           gname_has_interp :: Bool
-                         }
+data ResGName = ResGName {
+  gname_ident :: Ident,
+  -- ^ The Grappa identifier this name came from, for printing
+  gname_th_name :: TH.Name,
+  -- ^ The Template Haskell identifier for this name, which is of the form
+  -- @interp__XXX@ for identifier @XXX@
+  gname_type :: TopType,
+  -- ^ The top-level type of this name
+  gname_fixity :: TH.Fixity
+  -- ^ The fixity for this name (only used if it is an operator)
+  }
 
 instance Show ResGName where
-  show = show . gname_th_name
+  show = show . gname_ident
 
 -- | The type of resolved constructors
 data CtorInfo = CtorInfo { ctor_th_name :: TH.Name,
@@ -1204,7 +1188,7 @@ buildADTCtorInfo adt adt_ctor =
   let (r, vars, dom_tps) = adt_ctor_args adt_ctor
       ran_tp = ADTType adt (map VarType vars)
       r_subst = singleTVSubst r ran_tp
-      top_tp = TopType vars [] [] Set.empty (map (tpSubst r_subst) dom_tps) ran_tp
+      top_tp = TopType vars [] (map (tpSubst r_subst) dom_tps) ran_tp
   in
   CtorInfo { ctor_th_name = adt_ctor_th_name adt_ctor,
              ctor_type = top_tp,
@@ -1215,7 +1199,7 @@ buildBaseCtorInfo :: TypeNameInfo -> BaseCtor -> CtorInfo
 buildBaseCtorInfo base_tp base_ctor =
   let (vars, constrs, dom_tps) = base_ctor_args base_ctor
       ran_tp = BaseType base_tp (map VarType vars)
-      top_tp = TopType vars constrs [] Set.empty dom_tps ran_tp in -- XXX
+      top_tp = TopType vars constrs dom_tps ran_tp in -- XXX
   CtorInfo { ctor_th_name = base_ctor_th_name base_ctor,
              ctor_type = top_tp,
              ctor_is_adt = False }
