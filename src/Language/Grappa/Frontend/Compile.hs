@@ -331,6 +331,8 @@ mkLamInterp pats body = F.foldr go body pats
   where go p e =
           applyTHExp (TH.VarE 'interp__'lam) [ TH.LamE [p] e ]
 
+-- | Like 'mkCtorLamTHExp' but building an interpretation instead of just a raw
+-- TH expression
 mkCtorLamTHExpInterp :: CtorInfo -> [TH.Exp] -> TH.Exp
 mkCtorLamTHExpInterp ctor args_th =
   if ctor_is_adt ctor then
@@ -442,6 +444,8 @@ instance Compilable (Exp Rewritten) TH.Exp where
       return $ exp_th
     go (SigExp e _) = do
       compile e
+    go (AppExp (NameExp (CtorName ctor) _) args _) =
+      mkCtorLamTHExpInterp ctor <$> compile args
     go (AppExp f args _) = do
       f_th <- compile f
       args_th <- compile args
@@ -472,6 +476,59 @@ instance Compilable (Exp Rewritten) TH.Exp where
     go (ListExp enabled _) = notEnabled enabled
     go (ParensExp enabled _) = notEnabled enabled
     go (OpExp enabled _ _ _) = notEnabled enabled
+
+-- | "Raw", non-interpreted compilation of expressions, for, e.g., parameters to
+-- inference methods
+rawCompileExpr :: Exp Rewritten -> Compile TH.Exp
+rawCompileExpr e = withCompileCtx e $ compile' e where
+  compile' :: Exp Rewritten -> Compile TH.Exp
+  compile' (NameExp (LocalName x) _) =
+    return $ TH.VarE $ TH.mkName $ T.unpack x
+  compile' (NameExp (GlobalName nm) _) =
+    case gname_raw_th_name nm of
+      Just th_nm -> return $ TH.VarE th_nm
+      Nothing ->
+        throwError $ GErrorMisc $
+        "Cannot compile identifier in \"raw\" context: "
+        ++ T.unpack (gname_ident nm)
+  compile' (NameExp (CtorName ctor) _) = return $ mkCtorLamTHExp ctor []
+  compile' (LiteralExp (IntegerLit i) _tp) =
+    return $ TH.LitE $ TH.IntegerL i
+  compile' (LiteralExp (RationalLit r) _tp) =
+    return $ TH.LitE $ TH.RationalL r
+  compile' (SigExp _expr _tp) =
+    -- FIXME: need compileRawType here
+    throwError $ GErrorMisc $ "Cannot (yet) compile types in \"raw\" context"
+  compile' (AppExp (NameExp (CtorName ctor) _) args _) =
+    mkCtorLamTHExp ctor <$> mapM compile' args
+  compile' (AppExp f args _) =
+    do f_th <- compile' f
+       args_th <- mapM compile' args
+       return $ applyTHExp f_th args_th
+  compile' (TupleExp exps _) =
+    mkTupleTHExp <$> mapM compile' exps
+  compile' (OpExp enabled _ _ _) = notEnabled enabled
+  compile' (ParensExp enabled _) = notEnabled enabled
+  compile' (ListExp enabled _) = notEnabled enabled
+  compile' (LetExp n _ lhs rhs _) =
+    do lhs_th <- compile' lhs
+       rhs_th <- compile' rhs
+       return $ TH.LetE [TH.ValD (TH.VarP $ TH.mkName $ T.unpack n)
+                         (TH.NormalB lhs_th) []] rhs_th
+  compile' (CaseExp _scrut _cases _) =
+    throwError $ GErrorMisc $
+    "Cannot compile case expressions in \"raw\" context"
+  compile' (ModelExp _cases _) =
+    throwError $ GErrorMisc $
+    "Cannot compile model expressions in \"raw\" context"
+  compile' (IfExp c_e t_e e_e _) = do
+    c_th <- compile' c_e
+    t_th <- compile' t_e
+    e_th <- compile' e_e
+    return $ TH.CondE c_th t_th e_th
+  compile' (FunExp (FunCase _pats _expr) _) =
+    throwError $ GErrorMisc $
+    "Cannot compile lambda expressions in \"raw\" context"
 
 
 --
@@ -1004,6 +1061,7 @@ instance Compilable (Decl Rewritten) [TH.Dec] where
        tp_th <- compile annot
        addResolvedGName nm $ ResGName { gname_ident = nm,
                                         gname_th_name = nm_th,
+                                        gname_raw_th_name = Nothing,
                                         gname_type = annot,
                                         gname_fixity = TH.defaultFixity }
        Just fix_th <- compile_fix_parameter <$> get
@@ -1025,13 +1083,13 @@ instance Compilable (Decl Rewritten) [TH.Dec] where
                 (TH.NormalB src_exp_th) [] ]
 
   compile (MainDecl (GPriorStmt src_expr model_expr)
-            (InfMethod { infName = meth , infParams = es })) =
+            (InfMethod { infName = meth , infParams = params })) =
     do model_th <- compile model_expr
        src_expr_th <- compile src_expr
-       es_th <- compile es
+       params_th <- mapM rawCompileExpr params
        let mainExpr =
              applyTHExp (TH.VarE (imRunFunc meth)) $
-             es_th ++ src_expr_th : replicate (imModelCopies meth) model_th
+             params_th ++ src_expr_th : replicate (imModelCopies meth) model_th
        embedM $ [d| main :: IO ()
                     main = $(return mainExpr) |]
 

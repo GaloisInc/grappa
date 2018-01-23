@@ -205,13 +205,13 @@ resolveGName x =
         _ -> error "[unreachable]"
     top_tp <- rIngestTopType x th_tp
 
-    -- Step 3: get the operator fixity of the Haskell name "XXX" if possible
+    -- Step 3: get the "raw" TH name "XXX", if available, and its fixity
+    maybe_raw_th_nm <- embedM $ TH.lookupValueName $ T.unpack x
     maybe_fixity <-
       embedM $ TH.recover (return Nothing) $
-      do maybe_raw_th_nm <- TH.lookupValueName $ T.unpack x
-         case maybe_raw_th_nm of
-           Just raw_th_nm -> THCompat.reifyFixity raw_th_nm
-           Nothing -> return Nothing
+      case maybe_raw_th_nm of
+        Just raw_th_nm -> THCompat.reifyFixity raw_th_nm
+        Nothing -> return Nothing
     let fixity = case maybe_fixity of
           Just f  -> f
           Nothing -> TH.defaultFixity
@@ -219,6 +219,7 @@ resolveGName x =
     -- Finally: return the resulting global name
     return $ ResGName { gname_ident = x,
                         gname_th_name = th_nm,
+                        gname_raw_th_name = maybe_raw_th_nm,
                         gname_type = top_tp,
                         gname_fixity = fixity }
 

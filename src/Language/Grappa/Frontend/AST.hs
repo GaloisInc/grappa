@@ -1153,6 +1153,9 @@ data ResGName = ResGName {
   gname_th_name :: TH.Name,
   -- ^ The Template Haskell identifier for this name, which is of the form
   -- @interp__XXX@ for identifier @XXX@
+  gname_raw_th_name :: Maybe TH.Name,
+  -- ^ The "raw" Template Haskell identifier for this name, if it exists, which
+  -- is the Haskell identifier of the same name
   gname_type :: TopType,
   -- ^ The top-level type of this name
   gname_fixity :: TH.Fixity
