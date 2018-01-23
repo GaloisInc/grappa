@@ -998,22 +998,31 @@ instance Compilable (Decl Rewritten) [TH.Dec] where
   compile (ModelDecl {}) = do
     error "we should compile all ModelDecls to FunDecls via pattern-matching conversion"
 
-  compile (FunDecl nm annot [FunCase pats expr]) = do
-    let nm_th = TH.mkName $ T.unpack $ interpIdent nm
-    Just fix_th <- compile_fix_parameter `fmap` get
-    tp_th <- compile annot
-    expr_th <- compile expr
-    body_th <- mkInterpLam pats expr_th
-    let body_fix_th =
-          TH.AppE (TH.VarE 'interp__'fix)
-            (TH.LamE [TH.VarP fix_th] body_th)
-    return [ TH.SigD nm_th tp_th
-           , TH.FunD nm_th [TH.Clause [] (TH.NormalB body_fix_th) []]
-           ]
+  compile d@(FunDecl nm annot [FunCase pats expr]) =
+    withLocalCompileEnv $ withCompileCtx d $ withCurrentFunction nm $
+    do let nm_th = TH.mkName $ T.unpack $ interpIdent nm
+       tp_th <- compile annot
+       addResolvedGName nm $ ResGName { gname_ident = nm,
+                                        gname_th_name = nm_th,
+                                        gname_type = annot,
+                                        gname_fixity = TH.defaultFixity }
+       Just fix_th <- compile_fix_parameter <$> get
+       expr_th <- compile expr
+       body_th <- mkInterpLam pats expr_th
+       let body_fix_th =
+             TH.AppE (TH.VarE 'interp__'fix)
+             (TH.LamE [TH.VarP fix_th] body_th)
+       return [ TH.SigD nm_th tp_th
+              , TH.FunD nm_th [TH.Clause [] (TH.NormalB body_fix_th) []]
+              ]
+
   compile (FunDecl {}) =
     error "Function with more than one top-level case (we should rewrite these away)"
 
-  compile (SourceDecl _ _ _) = return []
+  compile (SourceDecl name _ src_exp) =
+    do src_exp_th <- compile src_exp
+       return [ TH.ValD (TH.VarP $ TH.mkName $ T.unpack name)
+                (TH.NormalB src_exp_th) [] ]
 
   compile (MainDecl (GPriorStmt src_expr model_expr)
             (InfMethod { infName = meth , infParams = es })) =
