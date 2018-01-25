@@ -752,10 +752,6 @@ instance GrappaADT adt => Interp__ADT__Expr BNExprRepr adt where
 instance GrappaADT adt => Interp__ADT BNExprRepr adt where
   interp__'vInjADT adt =
     GVExpr (VADT $ mapADT unGVExpr adt)
-  interp__'projADTStmt (GExpr (BNExprADT adt)) k = k adt
-  interp__'projADTStmt (GExpr (BNExprTuple adt)) k = k adt
-  interp__'projADTStmt (GExpr (BNExprDynamic _)) _ =
-    error "Pattern-match of dynamic value at distribution type"
   interp__'vProjMatchADT (GVExpr VParam) ctor _ k_succ _ =
     k_succ (mapADT (const $ GVExpr VParam) ctor)
   interp__'vProjMatchADT (GVExpr (VADT adt)) _ matcher k_succ k_fail =

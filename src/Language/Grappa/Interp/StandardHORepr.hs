@@ -95,7 +95,6 @@ instance (Monad m, TraversableADT adt) =>
          Interp__ADT (StandardHORepr m r i) adt where
   interp__'vInjADT adt =
     GVExpr (VADT $ mapADT unGVExpr adt)
-  interp__'projADTStmt (GExpr adt) k = k adt
   interp__'vProjMatchADT (GVExpr VParam) ctor _ k_succ _ =
     k_succ (mapADT (const $ GVExpr VParam) ctor)
   interp__'vProjMatchADT (GVExpr (VADT adt)) _ matcher k_succ k_fail =

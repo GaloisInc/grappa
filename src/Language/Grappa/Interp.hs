@@ -310,11 +310,6 @@ class (ValidRepr repr, Interp__ADT__Expr repr adt) =>
       Interp__ADT (repr :: *) (adt :: (* -> *) -> * -> *) where
   interp__'vInjADT :: adt (GVExpr repr) (ADT adt) -> GVExpr repr (ADT adt)
 
-  -- FIXME HERE NOW: remove projADTStmt, as it is never used!
-  interp__'projADTStmt :: GrappaType a => GExpr repr (ADT adt) ->
-                          (adt (GExpr repr) (ADT adt) -> GStmt repr a) ->
-                          GStmt repr a
-
   -- | Build a pattern-matching @case@ statement branch that tries to match an
   -- expression (the 1st argument) against a constructor pattern (given as a
   -- constructor application in the 2nd argument and as a pattern-matching

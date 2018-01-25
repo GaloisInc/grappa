@@ -228,10 +228,6 @@ instance Monad m => ValidRepr (ADHORepr m f) where
 
 instance (Monad m, TraversableADT adt) => Interp__ADT (ADHORepr m f) adt where
   interp__'vInjADT adt = GVExpr (VADT $ mapADT unGVExpr adt)
-  interp__'projADTStmt adt k =
-    -- NOTE: see disclaimer for the projTuple case, above
-    GStmt $ ADStmt $ \r -> (interp__'projADTStmt (applyADExpr r adt)
-                            (applyADStmt r . k . mapADT abstractADExpr))
   interp__'vProjMatchADT (GVExpr VParam) ctor _ k_succ _ =
     k_succ (mapADT (const $ GVExpr VParam) ctor)
   interp__'vProjMatchADT (GVExpr (VADT adt)) _ matcher k_succ k_fail =
