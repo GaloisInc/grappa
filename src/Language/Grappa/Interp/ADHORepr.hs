@@ -154,6 +154,12 @@ instance TraversableADT adt => Interp__ADT__Expr (ADHORepr m f) adt where
     GExpr $ ADExpr $ \r ->
     (interp__'projADT (applyADExpr r adt)
      (applyADExpr r . k . mapADT abstractADExpr))
+  interp__'projMatchADT adt ctor matcher k_succ k_fail =
+    -- NOTE: see disclaimer for the projTuple case, above
+    GExpr $ ADExpr $ \r ->
+    (interp__'projMatchADT (applyADExpr r adt) ctor matcher
+     (applyADExpr r . k_succ . mapADT abstractADExpr)
+     (applyADExpr r k_fail))
 
 
 instance EmbedRepr (ADHORepr m f) R where
@@ -226,6 +232,12 @@ instance (Monad m, TraversableADT adt) => Interp__ADT (ADHORepr m f) adt where
     -- NOTE: see disclaimer for the projTuple case, above
     GStmt $ ADStmt $ \r -> (interp__'projADTStmt (applyADExpr r adt)
                             (applyADStmt r . k . mapADT abstractADExpr))
+  interp__'vProjMatchADT (GVExpr VParam) ctor _ k_succ _ =
+    k_succ (mapADT (const $ GVExpr VParam) ctor)
+  interp__'vProjMatchADT (GVExpr (VADT adt)) _ matcher k_succ k_fail =
+    if applyCtorMatcher matcher adt then
+      k_succ (mapADT GVExpr adt)
+    else k_fail
 
 instance Interp__'source (ADHORepr m f) a where
   interp__'source src = GVExpr <$> interpSource src

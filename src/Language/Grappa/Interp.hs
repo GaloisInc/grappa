@@ -13,6 +13,8 @@
 
 module Language.Grappa.Interp where
 
+import Data.Proxy
+import Data.Maybe
 import qualified Numeric.Log as Log
 
 import qualified Numeric.AD.Mode.Forward as ADF
@@ -44,8 +46,9 @@ instance GrappaShowListContents (GExprRepr repr a) =>
          GrappaShowListContents (GExpr repr a) where
   showListContents (GExpr x) = showListContents x
 
+
 ----------------------------------------------------------------------
--- * Valid Representations of Grappa Expressions and Programs
+-- * Valid Representations of Grappa Expressions
 ----------------------------------------------------------------------
 
 -- | The class of valid representations of Grappa expressions
@@ -55,6 +58,7 @@ class ValidExprRepr (repr :: *) where
   -- NOTE: this is not used directly by the compiler
   interp__'bottom :: GExpr repr a
 
+  -- Creating and projecting tuples
   interp__'injTuple :: TupleF ts (GExpr repr) (ADT (TupleF ts))
                     -> GExpr repr (GTuple ts)
   interp__'projTuple :: IsTypeList ts
@@ -62,9 +66,11 @@ class ValidExprRepr (repr :: *) where
                      -> (TupleF ts (GExpr repr) (ADT (TupleF ts)) -> GExpr repr r)
                      -> GExpr repr r
 
+  -- Creating and applying functions
   interp__'app :: GExpr repr (a -> b) -> GExpr repr a -> GExpr repr b
   interp__'lam :: (GExpr repr a -> GExpr repr b) -> GExpr repr (a -> b)
 
+  -- Fixed-points
   interp__'fix :: (GExpr repr a -> GExpr repr a) -> GExpr repr a
 
 
@@ -76,16 +82,20 @@ class ValidExprRepr repr => StrongTupleRepr repr where
                               TupleF ts (GExpr repr) (ADT (TupleF ts))
 
 
+----------------------------------------------------------------------
+-- * Valid Representations of Grappa Programs
+----------------------------------------------------------------------
+
 -- | The class of valid representations of Grappa programs (including
 -- expressions)
 class ValidExprRepr repr => ValidRepr (repr :: *) where
   type GVExprRepr repr (a :: *) :: *
   type GStmtRepr repr (a :: *) :: *
 
-  interp__'projTupleStmt :: IsTypeList ts
-                         => GExpr repr (GTuple ts)
-                         -> (TupleF ts (GExpr repr) (ADT (TupleF ts)) -> GStmt repr r)
-                         -> GStmt repr r
+  interp__'projTupleStmt ::
+    IsTypeList ts => GExpr repr (GTuple ts) ->
+    (TupleF ts (GExpr repr) (ADT (TupleF ts)) -> GStmt repr r) ->
+    GStmt repr r
 
   -- v-expression constructs
   interp__'vInjTuple :: TupleF ts (GVExpr repr) (ADT (TupleF ts))
@@ -105,25 +115,217 @@ class ValidExprRepr repr => ValidRepr (repr :: *) where
   interp__'mkDist :: (GVExpr repr a -> GStmt repr a) -> GExpr repr (Dist a)
 
 
+-- | The class of representations that can read variables from a data source
+class Interp__'source repr a where
+  interp__'source :: Source a -> IO (GVExpr repr a)
+
+
+----------------------------------------------------------------------
+-- * Grappa Pattern-Matching
+----------------------------------------------------------------------
+
+-- | A pattern-matching computation over expressions. These intuitively
+-- represent the body of a @case@ expression, encompassing zero or more branches
+-- that can optionally match some set of inputs. The representation here is
+-- similar in spirit to a CPS computation, where a failure continuation is taken
+-- in as input. Any failure to match in a given @case@ expression body will fail
+-- over to the next alternative branch by returning the failure continuation.
+newtype GMatch repr a = GMatch { unGMatch :: GExpr repr a -> GExpr repr a }
+
+-- | Build a pattern-matching expression from a @case@ expression body
+interp__'match :: ValidExprRepr repr => GMatch repr a -> GExpr repr a
+interp__'match (GMatch m) = m interp__'bottom
+
+-- | Build a @case@ expression body that always succeeds and returns the given
+-- body of the @case@ expression
+interp__'matchBody :: GExpr repr a -> GMatch repr a
+interp__'matchBody body = GMatch $ \_ -> body
+
+-- | Build a @case@ expression body that always fails
+interp__'matchFail :: GMatch repr a
+interp__'matchFail = GMatch $ \k_fail -> k_fail
+
+-- | Build a disjunctive @case@ expression body that tries the first @case@
+-- expression body and then, if that fails, tries the second
+interp__'matchDisj :: GMatch repr a -> GMatch repr a -> GMatch repr a
+interp__'matchDisj (GMatch m1) (GMatch m2) =
+  GMatch $ \k_fail -> m1 (m2 k_fail)
+
+-- | Build a @case@ expression body that matches on a tuple
+interp__'matchTuple ::
+  (ValidExprRepr repr, IsTypeList ts) =>
+  GExpr repr (ADT (TupleF ts)) ->
+  (TupleF ts (GExpr repr) (ADT (TupleF ts)) -> GMatch repr a) ->
+  GMatch repr a
+interp__'matchTuple e k_succ =
+  GMatch $ \k_fail ->
+  interp__'projTuple e (\tup -> unGMatch (k_succ tup) k_fail)
+
+-- | Build a pattern-matching @case@ expression body that tries to match an
+-- expression (the 1st argument) against a constructor pattern (given as a
+-- constructor application in the 2nd argument and as a pattern-matching
+-- function in the 3rd argument). If the match is successful, the arguments of
+-- the constructor are passed to the 4th argument.
+interp__'matchADT ::
+  (GrappaType a, Interp__ADT__Expr repr adt) =>
+  GExpr repr (ADT adt) -> adt Proxy (ADT adt) -> CtorMatcher adt ->
+  (adt (GExpr repr) (ADT adt) -> GMatch repr a) ->
+  GMatch repr a
+interp__'matchADT e ctor_proxy matcher k_succ =
+  GMatch $ \k_fail ->
+  (interp__'projMatchADT e ctor_proxy matcher $ \adt ->
+    unGMatch (k_succ adt) k_fail)
+  k_fail
+
 -- | The class of expression representations that can handle a specific @adt@
 class ValidExprRepr repr =>
       Interp__ADT__Expr (repr :: *) (adt :: (* -> *) -> * -> *) where
   interp__'injADT :: adt (GExpr repr) (ADT adt) -> GExpr repr (ADT adt)
+
+  -- FIXME HERE NOW: remove projADT!
   interp__'projADT :: GrappaType a => GExpr repr (ADT adt) ->
                       (adt (GExpr repr) (ADT adt) -> GExpr repr a) ->
                       GExpr repr a
+
+  -- | Test if an ADT expression matches a given constructor (specified by the
+  -- 2nd and 3rd arguments), and if so, pass it to the "success continuation"
+  -- (the 4th argument), and otherwise return the "failure continuation" (the
+  -- 5th argument)
+  interp__'projMatchADT ::
+    GrappaType a => GExpr repr (ADT adt) ->
+    adt Proxy (ADT adt) -> CtorMatcher adt ->
+    (adt (GExpr repr) (ADT adt) -> GExpr repr a) -> GExpr repr a ->
+    GExpr repr a
+
+
+----------------------------------------------------------------------
+-- * Pattern-Matching over V-Expressions
+----------------------------------------------------------------------
+
+-- | The type of the body of a @case@ statement at the model level, represented
+-- as the CPS translation of a list of cases that may or may not match the
+-- current input along with their probabilities
+newtype GVMatch repr a =
+  GVMatch { unGVMatch ::
+              ([(GExpr repr Prob, Maybe (GStmt repr a))] -> GStmt repr a) ->
+              GStmt repr a }
+
+-- | The type of a single @case@ statement branch, represented as the CPS
+-- translation of a statement that may or may not match the current input
+newtype GVMatchOne repr a =
+  GVMatchOne { unGVMatchOne ::
+                 (Maybe (GStmt repr a) -> GStmt repr a) -> GStmt repr a }
+
+-- | Build a pattern-matching statement from a @case@ statement body
+interp__'vmatch :: (ValidRepr repr, Interp__categorical repr,
+                    Interp__'intSwitch repr,
+                    Interp__'integer repr Prob, Interp__'integer repr Int,
+                    Interp__'plus repr Prob, Interp__'div repr Prob,
+                    Interp__ADT__Expr repr (ListF Prob)) =>
+                   GVMatch repr a -> GStmt repr a
+interp__'vmatch (GVMatch m) = m helper where
+  -- helper :: [(GExpr repr Prob, Maybe (GStmt repr a))] -> GStmt repr a
+  helper ps_ms =
+    -- Extract the probability exprs for the cases that do and don't match, and
+    -- also get those cases that do match
+    let (yes_ps, no_ps) = get_split_ps ps_ms
+        expr_plus e1 e2 = interp__'app (interp__'app interp__'plus e1) e2
+        expr_div e1 e2 = interp__'app (interp__'app interp__'div e1) e2
+        yes_sum = foldr expr_plus (interp__'integer 0) yes_ps
+        no_sum = foldr expr_plus (interp__'integer 0) no_ps
+        total_sum = expr_plus yes_sum no_sum
+        yes_norm = expr_div yes_sum total_sum
+        no_norm = expr_div no_sum total_sum
+        branches = catMaybes $ map snd ps_ms in
+    -- Sample two variables: one for choosing the set of cases that do match out
+    -- of all the possible matches, which is represented by sampling a known 0
+    -- value from the categorical distribution with the weights
+    -- [yes_sum/total_sum, no_sum/total_sum]; and a second variable for choosing
+    -- among the cases that do match, which is represented by samplng an unknown
+    -- value from the categorical distribution [yes_1, .., yes_n]
+    interp__'vlift (interp__'integer 0) $ \vexp_0 ->
+    interp__'vwild $ \vexp_wild ->
+    interp__'sample (expr_categorical [yes_norm, no_norm]) vexp_0 $ \_ ->
+    interp__'sample (expr_categorical yes_ps) vexp_wild $ \branch_num ->
+    interp__'intSwitch branch_num branches
+
+  get_split_ps :: [(a, Maybe b)] -> ([a], [a])
+  get_split_ps =
+    foldr (\(a, maybe_b) (yes_l, no_l) ->
+            maybe (a:yes_l, no_l) (const (yes_l, a:no_l)) maybe_b) ([],[])
+
+  expr_categorical :: (Interp__categorical repr,
+                       Interp__ADT__Expr repr (ListF Prob)) =>
+                      [GExpr repr Prob] -> GExpr repr (Dist Int)
+  expr_categorical =
+    interp__'app interp__categorical .
+    foldr (\p ps -> interp__'injADT $ Cons p ps) (interp__'injADT Nil)
+
+
+-- | Build a @case@ statement branch that always succeeds and returns the given
+-- statement
+interp__'vmatchBody :: GStmt repr a -> GVMatchOne repr a
+interp__'vmatchBody body = GVMatchOne $ \k -> k $ Just body
+
+-- | Build an empty @case@ statement, with no branches
+interp__'vmatchFail :: GVMatch repr a
+interp__'vmatchFail = GVMatch $ \k -> k []
+
+-- | Build a disjunctive @case@ statement body that tries the first @case@
+-- statement body with a given probability and combines it with the remaining
+-- @case@ statement body
+interp__'vmatchDisj :: GExpr repr Prob -> GVMatchOne repr a ->
+                       GVMatch repr a -> GVMatch repr a
+interp__'vmatchDisj p (GVMatchOne m1) (GVMatch m2) =
+  GVMatch $ \k1 ->
+  m1 (\maybe_s -> m2 (\ps_ms -> k1 ((p, maybe_s) : ps_ms)))
+
+-- | Build a @case@ statement branch that matches on a tuple
+interp__'vmatchTuple ::
+  (ValidRepr repr, IsTypeList ts) =>
+  GVExpr repr (ADT (TupleF ts)) ->
+  (TupleF ts (GVExpr repr) (ADT (TupleF ts)) -> GVMatchOne repr a) ->
+  GVMatchOne repr a
+interp__'vmatchTuple ve k_succ =
+  GVMatchOne $ \k_fail ->
+  interp__'vProjTuple ve (\tup -> unGVMatchOne (k_succ tup) k_fail)
+
+-- | Build a pattern-matching @case@ statement branch that tries to match an
+-- expression (the 1st argument) against a constructor pattern (given as a
+-- constructor application in the 2nd argument and as a pattern-matching
+-- function in the 3rd argument). If the match is successful, the arguments of
+-- the constructor are passed to the 4th argument.
+interp__'vmatchADT ::
+  (GrappaType a, Interp__ADT repr adt) =>
+  GVExpr repr (ADT adt) -> adt Proxy (ADT adt) -> CtorMatcher adt ->
+  (adt (GVExpr repr) (ADT adt) -> GVMatchOne repr a) ->
+  GVMatchOne repr a
+interp__'vmatchADT vexpr ctor_proxy matcher k_succ =
+  GVMatchOne $ \k_fail ->
+  interp__'vProjMatchADT vexpr ctor_proxy matcher
+  (\adt -> unGVMatchOne (k_succ adt) k_fail) (k_fail Nothing)
 
 -- | The class of program representations that can handle a specific @adt@
 class (ValidRepr repr, Interp__ADT__Expr repr adt) =>
       Interp__ADT (repr :: *) (adt :: (* -> *) -> * -> *) where
   interp__'vInjADT :: adt (GVExpr repr) (ADT adt) -> GVExpr repr (ADT adt)
+
+  -- FIXME HERE NOW: remove projADTStmt, as it is never used!
   interp__'projADTStmt :: GrappaType a => GExpr repr (ADT adt) ->
                           (adt (GExpr repr) (ADT adt) -> GStmt repr a) ->
                           GStmt repr a
 
--- | The class of representations that can read variables from a data source
-class Interp__'source repr a where
-  interp__'source :: Source a -> IO (GVExpr repr a)
+  -- | Build a pattern-matching @case@ statement branch that tries to match an
+  -- expression (the 1st argument) against a constructor pattern (given as a
+  -- constructor application in the 2nd argument and as a pattern-matching
+  -- function in the 3rd argument). If the match is successful, the arguments of
+  -- the constructor are passed to the 4th argument, and otherwise the 5th
+  -- argument is returned.
+  interp__'vProjMatchADT ::
+    GrappaType a => GVExpr repr (ADT adt) ->
+    adt Proxy (ADT adt) -> CtorMatcher adt ->
+    (adt (GVExpr repr) (ADT adt) -> GStmt repr a) -> GStmt repr a ->
+    GStmt repr a
 
 
 ----------------------------------------------------------------------
@@ -133,6 +335,11 @@ class Interp__'source repr a where
 class (ValidExprRepr repr) => Interp__'ifThenElse repr where
   interp__'ifThenElse :: GExpr repr Bool -> GExpr repr a -> GExpr repr a ->
                          GExpr repr a
+
+-- | Class for interpreting a form of @switch@ statement over 'Int' expressions,
+-- which returns the @i@th expression for 'Int' @i@
+class (ValidRepr repr) => Interp__'intSwitch repr where
+  interp__'intSwitch :: GExpr repr Int -> [GStmt repr a] -> GStmt repr a
 
 class (ValidExprRepr repr) => Interp__not repr where
   interp__not :: GExpr repr (Bool -> Bool)
@@ -579,6 +786,7 @@ interp__empty2 x
              let _ = interp__'app (interp__'app interp__'plus x) y
              in interp__'return (interp__'injTuple Tuple0))
 
+{-
 interp__sum ::
   forall repr.
   ( Interp__'integer repr Int
@@ -590,6 +798,7 @@ interp__sum = interp__'lam $ \ lst ->
     case __s of
       Cons x xs -> interp__'app (interp__'app interp__'plus x) (interp__'app interp__sum xs)
       Nil       -> interp__'integer 0
+-}
 
 
 ----------------------------------------------------------------------

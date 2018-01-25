@@ -3,6 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 
 module Language.Grappa.Interp.MonoidRepr where
 
@@ -47,6 +48,9 @@ instance (Monoid w, Eq w, TraversableADT adt, ReifyCtorsADT adt) =>
   interp__'projADT (GExpr w1) projF =
     GExpr $ mconcat $ map (unGExpr . projF . mapADT (\_ -> GExpr w1)) $
     reifyCtorsADT
+  interp__'projMatchADT (GExpr w1) ctor_proxy _ k_succ (GExpr w_fail) =
+    GExpr $ mappend w1 $ mappend w_fail $
+    unGExpr $ k_succ $ mapADT (\_ -> interp__'bottom) ctor_proxy
 
 
 ----------------------------------------------------------------------

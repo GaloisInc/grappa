@@ -191,6 +191,10 @@ foldADT :: TraversableADT adt =>
            (forall a. f a -> r) -> (r -> r -> r) -> r -> adt f (ADT adt) -> r
 foldADT resF f x = foldr f x . ctorArgsADT resF
 
+-- | A function that can test if a given ADT uses a specific constructor
+newtype CtorMatcher adt =
+  CtorMatcher { applyCtorMatcher :: forall f. adt f (ADT adt) -> Bool }
+
 -- | Typeclass of ADTs where we can enumerate all the constructors, by building
 -- a list of ADT elements with 'Proxy's as arguments
 class ReifyCtorsADT adt where
@@ -528,6 +532,21 @@ instance EmbedDistVarADT BoolF where
   embedDistVarADT TrueF  = TrueF
   embedDistVarADT FalseF = FalseF
 
+-- Also need CtorMatchers for each constructor
+ctorMatcher__TrueF :: CtorMatcher BoolF
+ctorMatcher__TrueF =
+  CtorMatcher (\ x ->
+               case x of
+                 TrueF -> True
+                 _ -> False)
+
+ctorMatcher__FalseF :: CtorMatcher BoolF
+ctorMatcher__FalseF =
+  CtorMatcher (\ x ->
+               case x of
+                 FalseF -> True
+                 _ -> False)
+
 -- | Type synonym for lists, as Grappa ADTs
 type GBool = ADT BoolF
 
@@ -572,6 +591,21 @@ instance EmbedDistVar a => EmbedDistVarADT (ListF a) where
   embedDistVarADT Nil = Nil
   embedDistVarADT (Cons (Id x) (Id (ADT xs))) =
     Cons (embedDistVar x) (VADT $ embedDistVarADT xs)
+
+-- Also need CtorMatchers for each constructor
+ctorMatcher__Nil :: CtorMatcher (ListF a)
+ctorMatcher__Nil =
+  CtorMatcher (\ x ->
+               case x of
+                 Nil -> True
+                 _ -> False)
+
+ctorMatcher__Cons :: CtorMatcher (ListF a)
+ctorMatcher__Cons =
+  CtorMatcher (\ x ->
+               case x of
+                 Cons _ _ -> True
+                 _ -> False)
 
 -- | Type synonym for lists, as Grappa ADTs
 type GList a = ADT (ListF a)

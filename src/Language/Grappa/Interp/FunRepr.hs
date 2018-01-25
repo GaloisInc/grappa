@@ -72,6 +72,11 @@ instance (TraversableADT adt, Interp__ADT__Expr repr adt) =>
     GExpr $ \r ->
     unGExpr (interp__'projADT (applyFunRepr r adt)
              (applyFunRepr r . k . mapADT abstractFunRepr))
+  interp__'projMatchADT adt ctor_proxy matcher k_succ k_fail =
+    GExpr $ \r ->
+    unGExpr (interp__'projMatchADT (applyFunRepr r adt) ctor_proxy matcher
+             (applyFunRepr r . k_succ . mapADT abstractFunRepr)
+             (applyFunRepr r k_fail))
 
 instance EmbedRepr repr a => EmbedRepr (FunRepr r repr) a where
   embedRepr a =

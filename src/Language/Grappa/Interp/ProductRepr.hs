@@ -100,11 +100,21 @@ instance (TraversableADT adt, Interp__ADT__Expr repr1 adt,
   interp__'projADT (GExpr (adt1, adt2)) k =
     GExpr (unGExpr $
            interp__'projADT (GExpr adt1)
-           (projProduct1 . k . mapADT (injProduct1 Proxy)),
+           (projProduct1 . k . mapADT (injProduct1 Proxy))
+          ,
            unGExpr $
            interp__'projADT (GExpr adt2)
            (projProduct2 . k . mapADT (injProduct2 Proxy)))
-
+  interp__'projMatchADT adt ctor_proxy matcher k_succ k_fail =
+    GExpr (unGExpr $
+           interp__'projMatchADT (projProduct1 adt) ctor_proxy matcher
+           (projProduct1 . k_succ . mapADT (injProduct1 Proxy))
+           (projProduct1 k_fail)
+          ,
+           unGExpr $
+           interp__'projMatchADT (projProduct2 adt) ctor_proxy matcher
+           (projProduct2 . k_succ . mapADT (injProduct2 Proxy))
+           (projProduct2 k_fail))
 
 instance (EmbedRepr repr1 a, EmbedRepr repr2 a) =>
          EmbedRepr (ProductRepr repr1 repr2) a where

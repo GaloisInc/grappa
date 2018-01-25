@@ -737,6 +737,17 @@ instance GrappaADT adt => Interp__ADT__Expr BNExprRepr adt where
   interp__'projADT (GExpr (BNExprTuple adt)) k = k adt
   interp__'projADT (GExpr (BNExprDynamic dyn)) k =
     bnDynToExpr $ interp__'projADT dyn (bnExprToDyn . k . mapADT bnDynToExpr)
+  interp__'projMatchADT (GExpr (BNExprADT adt)) _ matcher k_succ k_fail =
+    if (applyCtorMatcher matcher adt) then k_succ adt
+    else k_fail
+  interp__'projMatchADT (GExpr (BNExprTuple adt)) _ matcher k_succ k_fail =
+    if (applyCtorMatcher matcher adt) then k_succ adt
+    else k_fail
+  interp__'projMatchADT (GExpr
+                         (BNExprDynamic dyn)) ctor matcher k_succ k_fail =
+    bnDynToExpr $ interp__'projMatchADT dyn ctor matcher
+    (bnExprToDyn . k_succ . mapADT bnDynToExpr)
+    (bnExprToDyn k_fail)
 
 instance GrappaADT adt => Interp__ADT BNExprRepr adt where
   interp__'vInjADT adt =
@@ -745,6 +756,12 @@ instance GrappaADT adt => Interp__ADT BNExprRepr adt where
   interp__'projADTStmt (GExpr (BNExprTuple adt)) k = k adt
   interp__'projADTStmt (GExpr (BNExprDynamic _)) _ =
     error "Pattern-match of dynamic value at distribution type"
+  interp__'vProjMatchADT (GVExpr VParam) ctor _ k_succ _ =
+    k_succ (mapADT (const $ GVExpr VParam) ctor)
+  interp__'vProjMatchADT (GVExpr (VADT adt)) _ matcher k_succ k_fail =
+    if (applyCtorMatcher matcher adt) then
+      k_succ $ mapADT GVExpr adt
+    else k_fail
 
 instance Interp__'source BNExprRepr a where
   interp__'source src = GVExpr <$> interpSource src
