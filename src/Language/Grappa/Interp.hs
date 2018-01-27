@@ -1,5 +1,6 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -17,10 +18,10 @@ import Data.Proxy
 import Data.Maybe
 import qualified Numeric.Log as Log
 
-import qualified Numeric.AD.Mode.Forward as ADF
-import qualified Numeric.AD.Mode.Reverse as ADR
-import qualified Numeric.AD.Internal.Reverse as ADR (Tape)
-import qualified Data.Reflection as ADR (Reifies)
+-- import qualified Numeric.AD.Mode.Forward as ADF
+-- import qualified Numeric.AD.Mode.Reverse as ADR
+-- import qualified Numeric.AD.Internal.Reverse as ADR (Tape)
+-- import qualified Data.Reflection as ADR (Reifies)
 
 import Language.Grappa.Distribution
 import Language.Grappa.GrappaInternals
@@ -100,9 +101,11 @@ class ValidExprRepr repr => ValidRepr (repr :: *) where
   -- v-expression constructs
   interp__'vInjTuple :: TupleF ts (GVExpr repr) (ADT (TupleF ts))
                      -> GVExpr repr (GTuple ts)
-  interp__'vProjTuple :: IsTypeList ts => GVExpr repr (GTuple ts)
-                      -> (TupleF ts (GVExpr repr) (ADT (TupleF ts)) -> GStmt repr r)
-                      -> GStmt repr r
+  interp__'vProjTuple ::
+    IsTypeList ts => GVExpr repr (GTuple ts) ->
+    (TupleF ts (GVExpr repr) (ADT (TupleF ts)) -> GStmt repr r) ->
+    GStmt repr r
+
   interp__'vwild :: (GVExpr repr a -> GStmt repr b) -> GStmt repr b
   interp__'vlift :: GrappaType a => GExpr repr a ->
                     (GVExpr repr a -> GStmt repr b) -> GStmt repr b
@@ -118,6 +121,29 @@ class ValidExprRepr repr => ValidRepr (repr :: *) where
 -- | The class of representations that can read variables from a data source
 class Interp__'source repr a where
   interp__'source :: Source a -> IO (GVExpr repr a)
+
+
+----------------------------------------------------------------------
+-- * The Default Representation of Variable Expressions
+----------------------------------------------------------------------
+
+-- | Variables that are a combination of data (potentially with missing values)
+-- and expressions that have been lifted to variables
+data DistVar repr a where
+  VParam :: DistVar repr a
+  VData :: GrappaData a -> DistVar repr a
+  VExpr :: GExpr repr a -> DistVar repr a
+  VADT :: TraversableADT adt => adt (DistVar repr) (ADT adt) ->
+          DistVar repr (ADT adt)
+
+{- FIXME: this requires normal projADT...
+-- | Match an 'ADT'-shaped 'DistVar'
+matchADTDistVar :: TraversableADT adt => DistVar repr (ADT adt) ->
+                   (adt (DistVar repr) (ADT adt) -> ret) -> ret -> ret
+matchADTDistVar VParam _ ret = ret
+matchADTDistVar (VData (ADT adt)) k _ = k $ mapADT (VData . unId) adt
+matchADTDistVar (VADT adt) k _ = k adt
+-}
 
 
 ----------------------------------------------------------------------
@@ -794,34 +820,6 @@ interp__sum = interp__'lam $ \ lst ->
       Cons x xs -> interp__'app (interp__'app interp__'plus x) (interp__'app interp__sum xs)
       Nil       -> interp__'integer 0
 -}
-
-
-----------------------------------------------------------------------
--- * Embedding Variables into Representations
-----------------------------------------------------------------------
-
--- | Typeclass stating that 'VData' variable data of type @d@ can be embedded
--- into representation type @r@
-class EmbedVarData d r where
-  embedVarData :: d -> r
-
--- | FIXME: this is only used in old, free-monad-based code...
-embedDV :: (IsAtomic a ~ 'True, EmbedVarData a (f a)) =>
-           DistVar a -> DistVar (f a)
-embedDV = mapDistVar embedVarData
-
-instance EmbedVarData a a where
-  embedVarData = id
-
-instance Num a => EmbedVarData a (ADF.Forward a) where
-  embedVarData = ADF.auto
-
-instance (ADR.Reifies s ADR.Tape, Num a) =>
-         EmbedVarData a (ADR.Reverse s a) where
-  embedVarData = ADR.auto
-
-instance EmbedVarData a b => EmbedVarData (M.Matrix a) (M.Matrix b) where
-  embedVarData = fmap embedVarData
 
 
 ----------------------------------------------------------------------

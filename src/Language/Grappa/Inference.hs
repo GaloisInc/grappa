@@ -127,14 +127,14 @@ gradHelper :: GrappaType a =>
                         VectorFun Prob, VectorFun (V.Vector Double))
 gradHelper src init_d d =
   do dv <- liftIO (interpSource src)
-     let init_model = sampleDist init_d $ GVExpr dv
-         model      = sampleDist d $ GVExpr dv
+     let init_model = sampleDist init_d $ GVExpr $ VData dv
+         model      = sampleDist d $ GVExpr $ VData dv
          mkVecFun f is rs = f (VectorSupply rs 0 is 0)
      (VectorSupply init_rs _ init_is _) <-
        initSupply init_model (VectorSupply V.empty 0 V.empty 0)
      return (init_is, init_rs,
              mkVecFun (outputOf model), mkVecFun (logProbOf model),
-             logGradientOf (sampleDist d $ GVExpr dv))
+             logGradientOf (sampleDist d $ GVExpr $ VData dv))
 
 runHMC :: (GrappaShow (SJReprF (VectorSupply Double Int) a), GrappaType a) =>
           Int -> Int -> R ->

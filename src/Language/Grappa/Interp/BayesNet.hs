@@ -16,6 +16,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Language.Grappa.Interp.BayesNet where
 
@@ -625,8 +626,9 @@ data BNExpr a where
   BNExprADT :: (TraversableADT adt, ReifyCtorsADT adt) =>
                (adt (GExpr BNExprRepr) (ADT adt)) ->
                BNExpr (ADT adt)
-  BNExprDist :: (DistVar a -> BNBuilder (GExpr BNExprRepr a)) ->
-                BNExpr (Dist a)
+  BNExprDist ::
+    (GrappaData a -> BNBuilder (GExpr BNExprRepr a)) ->
+    BNExpr (Dist a)
 
 -- | Extract a dynamic probability value from a 'BNExpr' of 'Prob' type
 bnExprToProb :: GExpr BNExprRepr Prob -> GExpr BNDynRepr Prob
@@ -635,7 +637,7 @@ bnExprToProb (GExpr (BNExprDynamic e)) = e
 
 -- | Extract a distribution function from a 'BNExpr' of distribution type
 bnExprToDist :: GExpr BNExprRepr (Dist a) ->
-                DistVar a -> BNBuilder (GExpr BNExprRepr a)
+                GrappaData a -> BNBuilder (GExpr BNExprRepr a)
 bnExprToDist (GExpr (BNExprDist f)) = f
 bnExprToDist (GExpr (BNExprDynamic dyn_dist)) = noDynDist dyn_dist
 
@@ -708,20 +710,34 @@ instance StrongTupleRepr BNExprRepr where
     mapADT (GExpr . BNExprDynamic) $ interp__'strongProjTuple e
 
 instance ValidRepr BNExprRepr where
-  type GVExprRepr BNExprRepr a = DistVar a
+  type GVExprRepr BNExprRepr a = GrappaData a
   type GStmtRepr BNExprRepr a = BNBuilder (GExpr BNExprRepr a)
 
   interp__'projTupleStmt e k = k $ interp__'strongProjTuple e
 
   interp__'vInjTuple !tup =
-    GVExpr (VADT $ mapADT unGVExpr tup)
-  interp__'vProjTuple (GVExpr (VADT !tup)) k =
-    k $ mapADT GVExpr tup
-  interp__'vProjTuple (GVExpr VParam) k =
-    k $ mapADT (\ _ -> GVExpr VParam) typeListProxy
+    GVExpr (GADTData $ mapADT unGVExpr tup)
+  interp__'vProjTuple (GVExpr d) k =
+    matchADTGData d
+    (k . mapADT GVExpr)
+    (k $ mapADT (\ _ -> GVExpr GNoData) typeListProxy)
 
-  interp__'vwild k = k (GVExpr VParam)
-  interp__'vlift _ _ = error "FIXME HERE: interp__'vlift"
+  interp__'vwild k = k (GVExpr GNoData)
+  interp__'vlift (GExpr e) k = k (GVExpr $ helper e) where
+    helper :: BNExpr a -> GrappaData a
+    helper (BNExprDynamic _) =
+      error "Cannot put a dynamic value on the left-hand side of a ~"
+    helper (BNExprBool b) = GData b
+    helper (BNExprInt i) = GData i
+    helper (BNExprDouble d) = GData d
+    helper (BNExprProb p) = GData p
+    helper (BNExprFun _) =
+      error "Cannot put a function on the left-hand side of a ~"
+    helper (BNExprTuple tup) = GADTData $ mapADT (helper . unGExpr) tup
+    helper (BNExprADT adt) = GADTData $ mapADT (helper . unGExpr) adt
+    helper (BNExprDist _) =
+      error "Cannot put a distribution on the left-hand side of a ~"
+  -- interp__'vliftInt i k = k (GVExpr $ VData $ Id i)
 
   interp__'return e = GStmt (return e)
   interp__'let rhs body = body rhs
@@ -750,14 +766,14 @@ instance GrappaADT adt => Interp__ADT__Expr BNExprRepr adt where
     (bnExprToDyn k_fail)
 
 instance GrappaADT adt => Interp__ADT BNExprRepr adt where
-  interp__'vInjADT adt =
-    GVExpr (VADT $ mapADT unGVExpr adt)
-  interp__'vProjMatchADT (GVExpr VParam) ctor _ k_succ _ =
-    k_succ (mapADT (const $ GVExpr VParam) ctor)
-  interp__'vProjMatchADT (GVExpr (VADT adt)) _ matcher k_succ k_fail =
-    if (applyCtorMatcher matcher adt) then
-      k_succ $ mapADT GVExpr adt
-    else k_fail
+  interp__'vInjADT adt = GVExpr (GADTData $ mapADT unGVExpr adt)
+  interp__'vProjMatchADT (GVExpr d) ctor matcher k_succ k_fail =
+    matchADTGData d
+    (\adt ->
+      if (applyCtorMatcher matcher adt) then
+        k_succ $ mapADT GVExpr adt
+      else k_fail)
+    (k_succ $ mapADT (const $ GVExpr GNoData) ctor)
 
 instance Interp__'source BNExprRepr a where
   interp__'source src = GVExpr <$> interpSource src
@@ -1128,10 +1144,10 @@ bnSubsetDistFromPDF :: (BNAssign Double -> MWCRandM Double) ->
 bnSubsetDistFromPDF sampler toReals fromReals pdf =
   GExpr $ BNExprDist $ \dv ->
   case dv of
-    VParam ->
+    GNoData ->
       (GExpr . BNExprDynamic . fromReals) <$>
       bnAddRealNode sampler (pdf . fromReals)
-    VData x ->
+    GData x ->
       bnAddUnitNode (pdf $ embedRepr $ toReals x) >>
       return (GExpr $ BNExprDouble x)
 
@@ -1197,10 +1213,10 @@ instance Interp__categorical BNExprRepr where
   interp__categorical =
     interp__'lam $ \ ws -> GExpr $ BNExprDist $ \dv ->
     case dv of
-      VParam ->
+      GNoData ->
         (GExpr . BNExprDynamic) <$>
         bnAddIntNode (map bnExprToDyn $ bnExprToStaticList ws)
-      VData i ->
+      GData i ->
         (bnAddUnitNode $ bnExprToDyn $ bnExprToStaticList ws !! i) >>
         return (GExpr $ BNExprInt i)
 
@@ -1253,41 +1269,36 @@ instance Interp__dirichlet BNExprRepr where
     -- FIXME: this currently does not marginalize over a subset of the
     -- variables, i.e., the user must supply all or none of them
     let alphas = bnExprToStaticList alphas_glist in
-    case dv_list_as_maybe_list dv_list of
-      Just xs ->
-        (bnAddUnitNode $ bnExprToDyn $
-         interp__'app interp__logRealToProb $ Log.ln $
-         dirichletDensity alphas (map (GExpr . BNExprDouble) xs)) >>
-        return (glistify $ map (GExpr . BNExprDouble) xs)
-      Nothing ->
+    case matchADTListData dv_list of
+      (all isMissingGData -> True, _) ->
         do ys <-
              forM [0 .. length alphas - 2] $ \i ->
              bnExprToDist
              (interp__'app (interp__'app interp__beta (alphas !! i))
               (sum $ drop (i+1) alphas))
-             VParam
+             GNoData
            let xs_butlast_rev =
                  foldl (\xs y_i -> (y_i * (1 - sum xs)) : xs) [] ys
            return $ glistify $ reverse $
              (1 - sum xs_butlast_rev) : xs_butlast_rev
+      (matchDataList -> Just xs, _) ->
+        if length xs == length alphas then
+          (bnAddUnitNode $ bnExprToDyn $
+           interp__'app interp__logRealToProb $ Log.ln $
+           dirichletDensity alphas (map (GExpr . BNExprDouble) xs)) >>
+          return (glistify $ map (GExpr . BNExprDouble) xs)
+        else
+          error "Wrong number of inputs to the Dirichlet distribution"
+      _ ->
+          error ("The Bayesian network interpretation of the Dirichlet"
+                 ++ " distribution does not yet support partial data")
     where
       glistify :: [GExpr BNExprRepr a] -> GExpr BNExprRepr (GList a)
       glistify = GExpr . BNExprADT . fromHaskellListF (GExpr . BNExprADT)
-      dv_list_as_maybe_list :: DistVar (GList R) -> Maybe [R]
-      dv_list_as_maybe_list VParam = Nothing
-      dv_list_as_maybe_list (VADT Nil) = Just []
-      dv_list_as_maybe_list (VADT (Cons VParam dv_list')) =
-        case dv_list_as_maybe_list dv_list' of
-          Just (_:_) ->
-            error ("The Bayesian network interpretation of the Dirichlet"
-                   ++ " distribution does not yet support partial data")
-          _ -> Nothing
-      dv_list_as_maybe_list (VADT (Cons (VData x) dv_list')) =
-        case dv_list_as_maybe_list dv_list' of
-          Just xs -> Just (x:xs)
-          Nothing ->
-            error ("The Bayesian network interpretation of the Dirichlet"
-                   ++ " distribution does not yet support partial data")
+      matchDataList :: [GrappaData R] -> Maybe [Double]
+      matchDataList = mapM (\dv -> case dv of
+                               GData x -> return x
+                               GNoData -> Nothing)
 
 {-
 instance Interp__dirichlet BNExprRepr where
@@ -1324,20 +1335,23 @@ instance Interp__dirichlet BNExprRepr where
 instance Interp__ctorDist__ListF BNExprRepr where
   interp__ctorDist__Nil =
     interp__'lam $ \ mkNil -> GExpr $ BNExprDist $ \dv ->
-    do _ <- case dv of
-              VParam      -> bnExprToDist mkNil VParam
-              VADT Nil    -> bnExprToDist mkNil (VADT Tuple0)
-              VADT Cons{} -> error "Unexpected Cons"
+    do _ <-
+         matchADTGData dv
+         (\adt -> case adt of
+             Nil    -> bnExprToDist mkNil (GADTData Tuple0)
+             Cons{} -> error "Unexpected Cons")
+         (bnExprToDist mkNil GNoData)
        return $ GExpr $ BNExprADT Nil
 
   interp__ctorDist__Cons =
     interp__'lam $ \ mkCons -> GExpr $ BNExprDist $ \dv ->
     do Tuple2 hd tl <-
          interp__'strongProjTuple <$>
-         case dv of
-           VParam              -> bnExprToDist mkCons (VADT (Tuple2 VParam VParam))
-           VADT Nil            -> error "Unexpected Nil"
-           VADT (Cons hdv tlv) -> bnExprToDist mkCons (VADT (Tuple2 hdv tlv))
+         matchADTGData dv
+         (\adt -> case adt of
+             Nil          -> error "Unexpected Nil"
+             Cons hdv tlv -> bnExprToDist mkCons (GADTData (Tuple2 hdv tlv)))
+         (bnExprToDist mkCons (GADTData (Tuple2 GNoData GNoData)))
        return $ GExpr $ BNExprADT $ Cons hd tl
 
 
@@ -1346,16 +1360,16 @@ instance Interp__adtDist__ListF BNExprRepr where
     interp__'lam $ \ probNil -> interp__'lam $ \ mkNil ->
     interp__'lam $ \ probCons -> interp__'lam $ \ mkCons ->
     GExpr $ BNExprDist $ \dv ->
-    case dv of
-      VADT Nil ->
-        bnAddUnitNode (bnExprToProb probNil) >>
-        void (bnExprToDist mkNil (VADT Tuple0)) >>
-        return (GExpr $ BNExprADT Nil)
-      VADT (Cons hdv tlv) ->
-        do bnAddUnitNode $ bnExprToProb probCons
-           Tuple2 hd tl <-
-             interp__'strongProjTuple <$>
-             bnExprToDist mkCons (VADT (Tuple2 hdv tlv))
-           return $ GExpr $ BNExprADT $ Cons hd tl
-      VParam ->
-        error "Bayesian networks do not support undetermined list distributions!"
+    matchADTGData dv
+    (\adt -> case adt of
+        Nil ->
+          bnAddUnitNode (bnExprToProb probNil) >>
+          void (bnExprToDist mkNil (GADTData Tuple0)) >>
+          return (GExpr $ BNExprADT Nil)
+        Cons hdv tlv ->
+          do bnAddUnitNode $ bnExprToProb probCons
+             Tuple2 hd tl <-
+               interp__'strongProjTuple <$>
+               bnExprToDist mkCons (GADTData (Tuple2 hdv tlv))
+             return $ GExpr $ BNExprADT $ Cons hd tl)
+    (error "Bayesian networks do not support undetermined list distributions!")

@@ -35,7 +35,7 @@ import qualified System.Random.MWC as MWC
 import qualified System.Random.MWC.Distributions as MWC
 
 -- import qualified Data.Matrix as M
-import qualified Numeric.Log as Log
+-- import qualified Numeric.Log as Log
 
 
 ----------------------------------------------------------------------
@@ -58,10 +58,9 @@ genReal gen = InitSupplyM $
      tell [Right r]
      return r
 
--- FIXME: this still takes the maximal int value; could this still be useful?
-genInt :: Supply supply => Int -> MWCRandM (SupplyInt supply) ->
+genInt :: Supply supply => MWCRandM (SupplyInt supply) ->
           InitSupplyM supply (SupplyInt supply)
-genInt _ gen = InitSupplyM $
+genInt gen = InitSupplyM $
   do supply_ref <- ask
      supply <- liftIO $ readIORef supply_ref
      (i, supply') <- lift $ lift $ supplyIntWithDefault supply gen
@@ -105,29 +104,30 @@ type DistCtx supply =
 type InitSupplyReprDI supply =
   StandardHORepr (InitSupplyM supply) Double Int
 
-instance (DistCtx supply,
-          EmbedVarData Double (SupplyReal supply)) =>
-         Interp__normal (InitSupplyReprDI supply) where
+instance DistCtx supply => Interp__normal (InitSupplyReprDI supply) where
   interp__normal = GExpr $ \ mu sigma dv ->
-    case dv of
-      VParam  -> genReal (random $ MWC.normal mu sigma)
-      VData x -> return $ embedVarData x
+    matchHOReprAtomicDistVar dv (return . unGExpr)
+    (genReal $ random $ MWC.normal mu sigma)
 
-instance (DistCtx supply,
-          EmbedVarData Double (SupplyReal supply)) =>
-         Interp__uniform (InitSupplyReprDI supply) where
+instance DistCtx supply => Interp__uniform (InitSupplyReprDI supply) where
   interp__uniform = GExpr $ \ lb ub dv ->
-    case dv of
-      VParam ->
-        fromRealLbUb lb ub <$>
-        genReal (toRealLbUb lb ub <$> random (MWC.uniformR (lb, ub)))
-      VData x -> return $ embedVarData x
+    matchHOReprAtomicDistVar dv (return . unGExpr)
+    (fromRealLbUb lb ub <$>
+     genReal (toRealLbUb lb ub <$> random (MWC.uniformR (lb, ub))))
+
+instance DistCtx supply => Interp__categorical (InitSupplyReprDI supply) where
+  interp__categorical = GExpr $ \ probs dv ->
+    matchHOReprAtomicDistVar dv (return . unGExpr)
+    (genInt $ mwcCategorical $ map (Prob . unGExpr) $
+     toHaskellListF unGExpr probs)
 
 
 ----------------------------------------------------------------------
 -- * Combinators for List Distributions
 ----------------------------------------------------------------------
 
+-- FIXME: remove this? Should be taken care of by the StandardHORepr instance
+{-
 instance DistCtx supply =>
          Interp__adtDist__ListF (InitSupplyReprDI supply) where
   interp__adtDist__ListF =
@@ -139,6 +139,7 @@ instance DistCtx supply =>
            genCons hdv tlv =
              do Tuple2 hd tl <- mkCons (VADT (Tuple2 hdv tlv))
                 return (Cons hd tl)
+       matchHOReprADTDistVar
        case dvList of
          VParam ->
            do choice <- genInt 2
@@ -159,3 +160,4 @@ instance DistCtx supply =>
 
          VADT Nil -> genNil
          VADT (Cons hdv tlv) -> genCons hdv tlv
+-}

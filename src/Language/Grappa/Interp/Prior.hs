@@ -15,6 +15,8 @@ module Language.Grappa.Interp.Prior (
   PriorRepr, PriorReprF, PriorM, samplePrior
   ) where
 
+import Data.Maybe
+
 import qualified Data.Vector as V
 
 import qualified System.Random.MWC as MWC
@@ -52,55 +54,53 @@ samplePrior stmt = runPriorM $ unGStmt stmt
 -- * Distributions
 ----------------------------------------------------------------------
 
-instance Interp__normal (StandardHORepr PriorM Double i) where
+instance Interp__normal PriorRepr where
   interp__normal = GExpr $ \ mu sigma dv ->
-    case dv of
-      VParam  ->
-        PriorM $
-        -- FIXME HERE: the following line causes a GHC panic!
-        -- random $ MWC.normal mu sigma
-        distSample (Normal mu sigma)
-      VData x -> return x
+    matchHOReprAtomicDistVar dv (return . unGExpr)
+    (PriorM $ mwcNormal mu sigma)
 
-instance Interp__uniform (StandardHORepr PriorM Double i) where
+instance Interp__uniform PriorRepr where
   interp__uniform = GExpr $ \ lb ub dv ->
-    case dv of
-      VParam  -> PriorM $ random $ MWC.uniformR (lb, ub)
-      VData x -> return x
+    matchHOReprAtomicDistVar dv (return . unGExpr)
+    (PriorM $ random $ MWC.uniformR (lb, ub))
 
-instance Interp__gamma (StandardHORepr PriorM Double i) where
+-- FIXME HERE: the following causes a GHC panic!
+{-
+instance Interp__gamma PriorRepr where
   interp__gamma = GExpr $ \k theta dv ->
-    case dv of
-      VParam  -> PriorM $ random $ MWC.gamma k theta
-      VData x -> return x
+    matchHOReprAtomicDistVar dv (return . unGExpr)
+    (PriorM $ random $ MWC.gamma k theta)
+-}
 
-instance Interp__dirichlet (StandardHORepr PriorM Double i) where
-  interp__dirichlet = GExpr $ \alphas dv ->
-    fromHaskellListF GExpr <$> map GExpr <$>
-    helper (map unGExpr $ toHaskellListF unGExpr alphas) dv
-    where
-      helper :: [Double] -> DistVar (GList Double) -> PriorM [Double]
-      helper alphas VParam = sample_vals alphas
-      helper alphas (getDatas -> Just xs) =
-        if length alphas == length xs then return xs else
-          error $ "Dirichlet distribution: wrong number of input data points!"
-      helper alphas _ = sample_vals alphas
+instance Interp__dirichlet PriorRepr where
+  interp__dirichlet = GExpr $ \alphas_gexpr dv ->
+    let (dvs, end_missing) = matchHOReprListDistVar dv
+        maybe_vs =
+          map (\dv' -> matchHOReprAtomicDistVar dv' (Just . unGExpr) Nothing)
+          dvs
+        alphas = map unGExpr $ toHaskellListF unGExpr alphas_gexpr in
+    if all isNothing maybe_vs then
+      -- If all values are missing, sample from the dirichlet distribution. This
+      -- allows the end of the list to be missing too, in which case this sample
+      -- will supply all its values
+      if length alphas == length maybe_vs ||
+         (length alphas >= length maybe_vs && end_missing) then
+        fromHaskellListF GExpr <$> map GExpr <$> PriorM (mwcDirichlet alphas)
+      else error "Dirichlet distribution: wrong number of values"
+    else
+      if all isJust maybe_vs then
+        -- If all values are present, just return them
+        if length alphas == length maybe_vs then
+          return $ fromHaskellListF GExpr $ map (GExpr . fromJust) maybe_vs
+        else
+          error "Dirichlet distribution: wrong number of values"
+      else
+        error "Dirichlet distribution: cannot (yet) sample when some elements are present"
 
-      sample_vals :: [Double] -> PriorM [Double]
-      sample_vals alphas = PriorM (random $ MWC.dirichlet alphas)
-
-      getDatas :: DistVar (GList R) -> Maybe [Double]
-      getDatas VParam = Nothing
-      getDatas (VADT Nil) = Just []
-      getDatas (VADT (Cons VParam _)) = Nothing
-      getDatas (VADT (Cons (VData x) rest)) = (x :) <$> getDatas rest
-
-instance Interp__categorical (StandardHORepr PriorM Double Int) where
+instance Interp__categorical PriorRepr where
   interp__categorical = GExpr $ \ probs dv ->
-    case dv of
-      VParam ->
-        let ws =
-              V.fromList $ map (Log.ln . unGExpr) $
-              toHaskellListF unGExpr probs in
-        PriorM $ random $ MWC.logCategorical ws
-      VData i -> return i
+    matchHOReprAtomicDistVar dv (return . unGExpr)
+    (let ws =
+           V.fromList $ map (Log.ln . unGExpr) $
+           toHaskellListF unGExpr probs in
+     PriorM $ random $ MWC.logCategorical ws)

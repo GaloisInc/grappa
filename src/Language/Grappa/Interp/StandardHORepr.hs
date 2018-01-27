@@ -25,6 +25,10 @@ import Language.Grappa.Frontend.DataSource
 import qualified Data.Matrix as M
 import qualified Numeric.Log as Log
 
+import qualified Numeric.AD.Mode.Reverse as ADR
+import qualified Numeric.AD.Internal.Reverse as ADR
+import qualified Data.Reflection as ADR (Reifies)
+
 
 ----------------------------------------------------------------------
 -- * The StandardHORepr Representation
@@ -38,7 +42,8 @@ data StandardHORepr (m :: * -> *) (r :: *) (i :: *) :: *
 type family StandardHOReprF m r i a :: * where
   StandardHOReprF m r i (a -> b) =
     (StandardHOReprF m r i a -> StandardHOReprF m r i b)
-  StandardHOReprF m r i (Dist a) = (DistVar a -> m (StandardHOReprF m r i a))
+  StandardHOReprF m r i (Dist a) =
+    (DistVar (StandardHORepr m r i) a -> m (StandardHOReprF m r i a))
   StandardHOReprF m r i (ADT adt) =
     adt (GExpr (StandardHORepr m r i)) (ADT adt)
   StandardHOReprF m r i Bool    = Bool
@@ -60,21 +65,69 @@ instance ValidExprRepr (StandardHORepr m r i) where
 instance StrongTupleRepr (StandardHORepr m r i) where
   interp__'strongProjTuple (GExpr tup) = tup
 
+-- | Helper to match on v-expressions of atomic type in the 'StandardHORepr': if
+-- the 'DistVar' is not a 'VParam', then destructure it and pass it to the
+-- continuation (the 2nd argument); otherwise, return the failure continuation
+-- (the 3rd argument)
+matchHOReprAtomicDistVar ::
+  (IsAtomic a ~ 'True, EmbedRepr (StandardHORepr m r i) a) =>
+  DistVar (StandardHORepr m r i) a ->
+  (GExpr (StandardHORepr m r i) a -> ret) -> ret -> ret
+matchHOReprAtomicDistVar VParam _ ret = ret
+matchHOReprAtomicDistVar (VData (GData a)) k _ = k $ embedRepr a
+matchHOReprAtomicDistVar (VData GNoData) _ ret = ret
+matchHOReprAtomicDistVar (VExpr e) k _ = k e
+
+-- | Test if a v-expression of atomic type is a "missing value"
+isMissingHOReprAtomicDistVar ::
+  (IsAtomic a ~ 'True, EmbedRepr (StandardHORepr m r i) a) =>
+  DistVar (StandardHORepr m r i) a -> Bool
+isMissingHOReprAtomicDistVar dv =
+  matchHOReprAtomicDistVar dv (\_ -> False) True
+
+-- | Helper to match on v-expressions in the 'StandardHORepr': if the 'DistVar'
+-- is not a 'VParam', then destructure it and pass it to the continuation (the
+-- 2nd argument); otherwise, return the failure continuation (the 3rd argument)
+matchHOReprADTDistVar ::
+  TraversableADT adt =>
+  DistVar (StandardHORepr m r i) (ADT adt) ->
+  (adt (DistVar (StandardHORepr m r i)) (ADT adt) -> ret) -> ret -> ret
+matchHOReprADTDistVar VParam _ ret = ret
+matchHOReprADTDistVar (VData (GData (ADT adt))) k _ =
+  k $ mapADT (VData . GData . unId) adt
+matchHOReprADTDistVar (VData GNoData) _ ret = ret
+matchHOReprADTDistVar (VData (GADTData adt)) k _ = k $ mapADT VData adt
+matchHOReprADTDistVar (VExpr (GExpr adt)) k _ = k $ mapADT VExpr adt
+matchHOReprADTDistVar (VADT adt) k _ = k adt
+
+-- | Recursively match a v-expression with list type, returning a list of
+-- 'DistVar's in the list along with a 'Bool' flag indicating whether the list
+-- ends with a "missing list", i.e., a 'VParam' or @'VData' 'GNoData'@
+matchHOReprListDistVar :: DistVar (StandardHORepr m r i) (GList a) ->
+                          ([DistVar (StandardHORepr m r i) a], Bool)
+matchHOReprListDistVar dv =
+  matchHOReprADTDistVar dv
+  (\adt -> case adt of
+      Nil -> ([], False)
+      Cons hdv tlv ->
+        let (l, flag) = matchHOReprListDistVar tlv in
+        (hdv:l, flag))
+  ([], True)
+
 instance Monad m => ValidRepr (StandardHORepr m r i) where
-  type GVExprRepr (StandardHORepr m r i) a = DistVar a
+  type GVExprRepr (StandardHORepr m r i) a =
+    DistVar (StandardHORepr m r i) a
   type GStmtRepr (StandardHORepr m r i) a = m (StandardHOReprF m r i a)
 
   interp__'projTupleStmt (GExpr !tup) k = k tup
 
-  interp__'vInjTuple !tup =
-    GVExpr (VADT $ mapADT unGVExpr tup)
-  interp__'vProjTuple (GVExpr (VADT !tup)) k =
-    k $ mapADT GVExpr tup
-  interp__'vProjTuple (GVExpr VParam) k =
-    k $ mapADT (\ _ -> GVExpr VParam) typeListProxy
+  interp__'vInjTuple !tup = GVExpr (VADT $ mapADT unGVExpr tup)
+  interp__'vProjTuple (GVExpr ve) k =
+    matchHOReprADTDistVar ve (k . mapADT GVExpr)
+    (k $ buildTuple $ GVExpr VParam)
 
   interp__'vwild k = k (GVExpr VParam)
-  interp__'vlift _ _ = error "FIXME HERE: interp__'vlift"
+  interp__'vlift e k = k (GVExpr $ VExpr e)
 
   interp__'return (GExpr !x) = GStmt (return x)
   interp__'let rhs body = body rhs
@@ -95,15 +148,17 @@ instance (Monad m, TraversableADT adt) =>
          Interp__ADT (StandardHORepr m r i) adt where
   interp__'vInjADT adt =
     GVExpr (VADT $ mapADT unGVExpr adt)
-  interp__'vProjMatchADT (GVExpr VParam) ctor _ k_succ _ =
-    k_succ (mapADT (const $ GVExpr VParam) ctor)
-  interp__'vProjMatchADT (GVExpr (VADT adt)) _ matcher k_succ k_fail =
-    if applyCtorMatcher matcher adt then
-      k_succ (mapADT GVExpr adt)
-    else k_fail
+  interp__'vProjMatchADT (GVExpr ve) ctor matcher k_succ k_fail =
+    matchHOReprADTDistVar ve
+    (\adt ->
+      if applyCtorMatcher matcher adt then
+        k_succ (mapADT GVExpr adt)
+      else k_fail)
+    (k_succ $ mapADT (const $ GVExpr VParam) ctor)
 
 instance Interp__'source (StandardHORepr m Double Int) a where
-  interp__'source src = GVExpr <$> interpSource src
+  interp__'source src =
+    GVExpr . VData <$> interpSource src
 
 instance EmbedRepr (StandardHORepr m Double i) R where
   embedRepr = GExpr
@@ -111,10 +166,18 @@ instance EmbedRepr (StandardHORepr m Double i) R where
 instance EmbedRepr (StandardHORepr m Double i) Prob where
   embedRepr = GExpr . fromProb
 
-instance EmbedRepr (StandardHORepr m r Int) Int where
-  embedRepr = GExpr
+instance ADR.Reifies s ADR.Tape =>
+         EmbedRepr (StandardHORepr m (ADR.Reverse s Double) i) R where
+  embedRepr = GExpr . ADR.auto
 
-instance EmbedRepr (StandardHORepr m r Int) Bool where
+instance ADR.Reifies s ADR.Tape =>
+         EmbedRepr (StandardHORepr m (ADR.Reverse s Double) i) Prob where
+  embedRepr = GExpr . fmap ADR.auto . fromProb
+
+instance Num i => EmbedRepr (StandardHORepr m r i) Int where
+  embedRepr = GExpr . fromIntegral
+
+instance EmbedRepr (StandardHORepr m r i) Bool where
   embedRepr = GExpr
 
 
@@ -340,18 +403,21 @@ instance i ~ Int => Interp__gerror (StandardHORepr m r i) a where
 
 instance Monad m => Interp__ctorDist__ListF (StandardHORepr m r i) where
   interp__ctorDist__Nil = GExpr $ \ mkNil dv ->
-    do _ <- case dv of
-              VParam      -> mkNil VParam
-              VADT Nil    -> mkNil (VADT Tuple0)
-              VADT Cons{} -> error "Unexpected Cons"
+    do _ <-
+         matchHOReprADTDistVar dv
+         (\adt -> case adt of
+             Nil -> mkNil (VADT Tuple0)
+             Cons _ _ -> error "Unexpected Cons")
+         (mkNil VParam)
        return Nil
 
   interp__ctorDist__Cons = GExpr $ \ mkCons dv ->
-    do Tuple2 hd tl <-
-         case dv of
-           VParam              -> mkCons (VADT (Tuple2 VParam VParam))
-           VADT Nil            -> error "Unexpected Nil"
-           VADT (Cons hdv tlv) -> mkCons (VADT (Tuple2 hdv tlv))
+    do (Tuple2 hd tl) <-
+         matchHOReprADTDistVar dv
+         (\adt -> case adt of
+             Nil -> error "Unexpected Nil"
+             Cons hdv tlv -> mkCons (VADT (Tuple2 hdv tlv)))
+         (mkCons (VADT (Tuple2 VParam VParam)))
        return (Cons hd tl)
 
 
@@ -364,7 +430,8 @@ instance (Monad m, Num i, Eq i, Show i,
     let
       -- Build a categorical distribution for the constructor, where 0 -> Nil
       -- and 1 -> Cons
-      ctor_dist :: DistVar Int -> m (StandardHOReprF m r i Int)
+      ctor_dist :: DistVar (StandardHORepr m r i) Int ->
+                   m (StandardHOReprF m r i Int)
       ctor_dist =
         unGExpr (interp__categorical
                  :: GExpr (StandardHORepr m r i) (GList Prob -> Dist Int)) $
@@ -375,20 +442,19 @@ instance (Monad m, Num i, Eq i, Show i,
       mkConsH hdv tlv =
         do Tuple2 hd tl <- mkCons (VADT (Tuple2 hdv tlv))
            return (Cons hd tl) in
-    case dvList of
-      VParam ->
-        do ctor_choice <- ctor_dist VParam
-           case ctor_choice of
-             0 -> void mkNilH >> return Nil
-             1 -> mkConsH VParam VParam
-             _ -> error ("ListF: Invalid constructor choice: "
-                         ++ show ctor_choice)
 
-      VADT Nil ->
-        void (ctor_dist $ VData 0) >> void mkNilH >> return Nil
-
-      VADT (Cons hdv tlv) ->
-        void (ctor_dist $ VData 1) >> mkConsH hdv tlv
+    matchHOReprADTDistVar dvList
+    (\adt -> case adt of
+        Nil ->
+          void (ctor_dist $ VData $ GData 0) >> void mkNilH >> return Nil
+        Cons hdv tlv ->
+          void (ctor_dist $ VData $ GData 1) >> mkConsH hdv tlv)
+    (do ctor_choice <- ctor_dist VParam
+        case ctor_choice of
+          0 -> void mkNilH >> return Nil
+          1 -> mkConsH VParam VParam
+          _ -> error ("ListF: Invalid constructor choice: "
+                      ++ show ctor_choice))
 
 
 --

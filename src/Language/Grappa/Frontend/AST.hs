@@ -127,9 +127,8 @@ type family GetTypePhase (p :: CompilerPhase) :: TypePhase where
   GetTypePhase Raw   = RawType
   GetTypePhase other = TypedType
 
--- | @'SrcVarName' p@ is the type of identifiers in
--- source-expressions; this starts as 'Ident' and eventually becomes
--- identified Template Haskell names
+-- | @'SrcVarName' p@ is the type of identifiers in source-expressions; this
+-- starts as 'Ident' and eventually becomes identified Template Haskell names
 type family SrcVarName (p :: CompilerPhase) :: * where
   SrcVarName Raw   = Ident
   SrcVarName other = TH.Name

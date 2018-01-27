@@ -6,6 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -103,7 +104,7 @@ updateJointProbM p =
 type SupplyJointCtx supply r i =
   (Supply supply, SupplyInt supply ~ i, SupplyReal supply ~ r,
    Show i, Eq i, Integral i, Show r, Ord r, Log.Precise r, RealFloat r,
-   EmbedVarData Double r, EmbedVarData Int i)
+   EmbedRepr (SJRepr supply) Double)
 
 -- | Run a 'SupplyJointM' computation
 runSupplyJointM :: SupplyJointCtx supply r i =>
@@ -158,7 +159,8 @@ logGradientOf :: (forall s. ADR.Reifies s ADR.Tape =>
 logGradientOf stmt is rs =
   ADR.grad (\grad_rs ->
              Log.ln $ fst $
-             runSupplyJointM (void $ unGStmt stmt) (VectorSupply grad_rs 0 is 0)) rs
+             runSupplyJointM (void $ unGStmt stmt)
+             (VectorSupply grad_rs 0 is 0)) rs
 
 
 ----------------------------------------------------------------------
@@ -168,30 +170,21 @@ logGradientOf stmt is rs =
 instance SupplyJointCtx supply r i =>
          Interp__normal (StandardHORepr (SupplyJointM supply) r i) where
   interp__normal = GExpr $ \ mu sigma dv ->
-    do val <-
-         case dv of
-           VParam  -> supplyRealM
-           VData x -> return $ embedVarData x
+    do val <- matchHOReprAtomicDistVar dv (return . unGExpr) supplyRealM
        updateJointProbM $ normalDensityGen mu sigma val
        return val
 
 instance SupplyJointCtx supply r i =>
          Interp__uniform (StandardHORepr (SupplyJointM supply) r i) where
   interp__uniform = GExpr $ \ lb ub dv ->
-    do val <-
-         case dv of
-           VParam  -> fromRealLbUb lb ub <$> supplyRealM
-           VData x -> return $ embedVarData x
+    do val <- matchHOReprAtomicDistVar dv (return . unGExpr) supplyRealM
        updateJointProbM $ uniformDensityGen lb ub val
        return val
 
 instance SupplyJointCtx supply r i =>
          Interp__categorical (StandardHORepr (SupplyJointM supply) r i) where
   interp__categorical = GExpr $ \ probs dv ->
-    do i <-
-         case dv of
-           VParam -> supplyIntM
-           VData i -> return $ embedVarData i
+    do i <- matchHOReprAtomicDistVar dv (return . unGExpr) supplyIntM
        let prob_exprs = toHaskellListF unGExpr probs
        updateJointProbM $ unGExpr $ prob_exprs !! fromIntegral i
        return i

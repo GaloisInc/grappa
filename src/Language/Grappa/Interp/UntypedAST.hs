@@ -8,6 +8,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Language.Grappa.Interp.UntypedAST
   ( ppAsPython
@@ -365,38 +366,45 @@ instance ToPythonDistVar r => Interp__'source UntypedRepr r where
     return (GVExpr (return (toPythonDistVar dv)))
 
 class ToPythonDistVar t where
-  toPythonDistVar :: DistVar t -> UntypedAST
+  toPythonDistVar :: GrappaData t -> UntypedAST
 
 instance ToPythonDistVar Double where
-  toPythonDistVar VParam = (Var "None")
-  toPythonDistVar (VData n) = (DoubleLit n)
+  toPythonDistVar GNoData = (Var "None")
+  toPythonDistVar (GData n) = (DoubleLit n)
 
 instance ToPythonDistVar Int where
-  toPythonDistVar VParam = (Var "None")
-  toPythonDistVar (VData n) = (IntLit (fromIntegral n))
+  toPythonDistVar GNoData = (Var "None")
+  toPythonDistVar (GData n) = (IntLit (fromIntegral n))
 
 instance forall t. ToPythonDistVar t => ToPythonDistVar (GList t) where
-  toPythonDistVar VParam = (Var "None")
-  toPythonDistVar (VADT list) = case gather list of
-    Just lst -> App (Var "grappa_list") (ListLiteral lst)
-    Nothing -> case list of
-      Cons x xs -> App (Var "list_repr.Cons")
-                       (Tuple [ toPythonDistVar x
-                              , toPythonDistVar xs
-                              ])
-      Nil -> App (Var "list_repr.Nil") (Tuple [])
-    where gather :: ToPythonDistVar t => ListF t DistVar (ADT (ListF t)) -> Maybe [UntypedAST]
-          gather (Cons _ VParam) = Nothing
-          gather (Cons x (VADT xs)) = do
-            rs <- gather xs
-            return (toPythonDistVar x : rs)
-          gather Nil = Just []
+  toPythonDistVar = toPythonDistVarH . matchADTGDataMaybe
+    where
+      toPythonDistVarH Nothing = (Var "None")
+      toPythonDistVarH (Just list) = case gather list of
+        Just lst -> App (Var "grappa_list") (ListLiteral lst)
+        Nothing -> case list of
+          Cons x xs ->
+            App (Var "list_repr.Cons")
+            (Tuple [ toPythonDistVar x
+                   , toPythonDistVar xs
+                   ])
+          Nil -> App (Var "list_repr.Nil") (Tuple [])
+      gather :: ToPythonDistVar t => ListF t GrappaData (ADT (ListF t)) ->
+                Maybe [UntypedAST]
+      gather (Cons x (matchADTGDataMaybe -> Just xs)) = do
+        rs <- gather xs
+        return (toPythonDistVar x : rs)
+      gather (Cons _ _) = Nothing
+      gather Nil = Just []
 
 instance MapC ToPythonDistVar ts => ToPythonDistVar (GTuple ts) where
-  toPythonDistVar VParam = (Var "None")
-  toPythonDistVar (VADT tup) = Tuple (tupleToPython tup)
+  toPythonDistVar = toPythonDistVarH . matchADTGDataMaybe
+    where
+      toPythonDistVarH Nothing = (Var "None")
+      toPythonDistVarH (Just tup) = Tuple (tupleToPython tup)
 
-tupleToPython :: MapC ToPythonDistVar ts => TupleF ts DistVar r -> [UntypedAST]
+tupleToPython :: MapC ToPythonDistVar ts => TupleF ts GrappaData r ->
+                 [UntypedAST]
 tupleToPython Tuple0 = []
 tupleToPython (Tuple1 a) = [ toPythonDistVar a ]
 tupleToPython (Tuple2 a b) =

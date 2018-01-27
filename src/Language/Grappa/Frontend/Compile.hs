@@ -297,14 +297,14 @@ mkADTCtorTHExp ctor args_th =
   else
     error "mkADTCtorTHExp: non-ADT constructor"
 
--- | Build a TH expression of type @'DistVar ('ADT' adt 'Id')@ for a Grappa
+-- | Build a TH expression of type @'GrappaData' ('ADT' adt 'Id')@ for a Grappa
 -- constructor of @adt@ and its argument expressions
-mkCtorDistVarTHExp :: CtorInfo -> [TH.Exp] -> TH.Exp
-mkCtorDistVarTHExp ctor args_th =
+mkCtorGrappaDataTHExp :: CtorInfo -> [TH.Exp] -> TH.Exp
+mkCtorGrappaDataTHExp ctor args_th =
   if ctor_is_adt ctor then
     applyTHExp (TH.ConE 'VADT) [applyTHExp (TH.ConE $ ctor_th_name ctor) args_th]
   else
-    error "mkCtorDistVarTHExp: non-ADT constructor"
+    error "mkCtorGrappaDataTHExp: non-ADT constructor"
 
 
 -- | Build a TH expression for a constructor that is partially applied to its
@@ -377,9 +377,9 @@ mkTupleTHExp :: [TH.Exp] -> TH.Exp
 mkTupleTHExp exps =
   applyTHExp (TH.ConE 'ADT) [mkTupleBodyTHExp $ map mkIdTHExp exps]
 
--- | Build a TH expression for a Grappa tuple inside a 'DistVar'
-mkTupleDistVarTHExp :: [TH.Exp] -> TH.Exp
-mkTupleDistVarTHExp exps =
+-- | Build a TH expression for a Grappa tuple inside a 'GrappaData'
+mkTupleGrappaDataTHExp :: [TH.Exp] -> TH.Exp
+mkTupleGrappaDataTHExp exps =
   applyTHExp (TH.ConE 'VADT) [mkTupleBodyTHExp exps]
 
 -- | Build a TH pattern for the "body" of a Grappa tuple (see 'mkTupleBodyTHExp'
@@ -635,6 +635,7 @@ compileFileSource filename fmt tp = do
         :: Source $(return tp_th)
         |]
 
+{-
 compileBasicDistVarPatt :: CompiledVarPattern Rewritten -> Compile TH.Pat
 compileBasicDistVarPatt (VarCPat x tp) = do
   tp_th <- compile tp
@@ -671,6 +672,12 @@ compileArmExpr lca@(ListCompArm _ ge) = withCompileCtx lca $ compile ge
 
 compileArmPat :: [ListCompArm Rewritten] -> Compile TH.Pat
 compileArmPat [ListCompArm pat _] = compileDistVarPatt pat
+-}
+
+compileArmExpr :: ListCompArm Rewritten -> Compile TH.Exp
+compileArmExpr _ = error "FIXME"
+
+compileArmPat :: [ListCompArm Rewritten] -> Compile TH.Pat
 compileArmPat _ = error "FIXME"
   -- do
   --   let pats = [ (pat, case pat of
@@ -703,7 +710,7 @@ instance Compilable (GenExp Rewritten) TH.Exp where
       let bgE = return (TH.SigE (TH.LitE (TH.IntegerL bg)) elem_th)
           stE = return (TH.LitE (TH.IntegerL st))
           toE = return (TH.LitE (TH.IntegerL to))
-      ee_th <-  lift $ lift [| dvToSource (embedDistVar (enumFromToByF $(bgE) $(toE) $(stE))) |]
+      ee_th <-  lift $ lift [| SourceData (enumFromToByF $(bgE) $(toE) $(stE)) |]
       tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
       return (TH.SigE ee_th tp_th)
     compile' (RangeGenExp bg Nothing st tp) = do
@@ -711,27 +718,22 @@ instance Compilable (GenExp Rewritten) TH.Exp where
       elem_th <- compile elm
       let bgE = return (TH.SigE (TH.LitE (TH.IntegerL bg)) elem_th)
           stE = return (TH.LitE (TH.IntegerL st))
-      ee_th <- lift $ lift [| dvToSource (embedDistVar (enumFromByF $(bgE) $(stE))) |]
+      ee_th <- lift $ lift [| SourceData (enumFromByF $(bgE) $(stE)) |]
       tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
       return (TH.SigE ee_th tp_th)
 
 instance Compilable (SourceExp Rewritten) TH.Exp where
   compile sexp = withCompileCtx sexp $ compile' sexp where
     compile' :: SourceExp Rewritten -> Compile TH.Exp
-    compile' (VarSrcExp nm tp) = do
-      -- A variable in a source expression literally refers to a Haskell
-      -- variable, which could either be a concrete value or it could itself be
-      -- a Source object, so we use the toSource method to convert it to Source,
-      -- which effectively uses GHC to do this case distinction
-      let ee_th = applyTHExp (TH.VarE 'toSource) [TH.VarE nm]
-      tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
-      return (TH.SigE ee_th tp_th)
+    compile' (VarSrcExp nm tp) =
+      -- "Global" variables should always have type Source a, as they should
+      -- only be referring to defined source expressions
+      TH.SigE (TH.VarE nm) <$> TH.AppT (TH.ConT ''Source) <$> compile tp
     compile' (BoundVarSrcExp nm tp) =
-      -- This is always going to be a variable bound somewhere in the source
-      -- expression
-      let nm' = TH.mkName $ T.unpack nm
-      in TH.SigE (applyTHExp (TH.VarE 'toSource) [TH.VarE nm']) <$>
-         TH.AppT (TH.ConT ''Source) <$> compile tp
+      -- Bound variables always have type GrappaData a, so apply SourceData
+      let nm' = TH.mkName $ T.unpack nm in
+      TH.SigE (applyTHExp (TH.ConE 'SourceData) [TH.VarE nm']) <$>
+      TH.AppT (TH.ConT ''Source) <$> compile tp
     compile' (WildSrcExp tp) =
       TH.SigE (TH.ConE 'SourceParam) <$>
       TH.AppT (TH.ConT ''Source) <$> compile tp
@@ -762,8 +764,8 @@ instance Compilable (SourceExp Rewritten) TH.Exp where
             typTH <- TH.AppT (TH.ConT ''Source) <$> compile typ
             let innerFun = applyTHExp (TH.ConE 'SourceBind)
                   [ TH.LamE [TH.VarP rName]
-                    (TH.AppE (TH.VarE 'dvToSource)
-                       (applyTHExp (TH.VarE 'zipDV)
+                    (TH.AppE (TH.ConE 'SourceData)
+                       (applyTHExp (TH.VarE 'zipGData)
                          [TH.VarE lName, TH.VarE rName]))
                   , rExpr
                   ]

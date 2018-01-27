@@ -3,14 +3,19 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-all #-}
 
 module Language.Grappa.Frontend.DataSource where
 
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Csv as Csv
@@ -20,6 +25,7 @@ import qualified Data.Vector as V
 import           GHC.Exts (Constraint)
 import qualified Numeric.AD.Mode as AD
 import qualified Numeric.AD.Mode.Forward as AD
+import qualified Data.Text as T
 
 import           Language.Grappa.GrappaInternals
 
@@ -28,6 +34,63 @@ import           Language.Grappa.GrappaInternals
 -- * DSL for Data Sources
 --
 
+-- | The type of data read from a data source, which could have missing values
+data GrappaData a where
+  -- | Data all of which is present
+  GData :: a -> GrappaData a
+  -- | A piece of data that is missing
+  GNoData :: GrappaData a
+  -- | ADT data, with a head constructor (in @adt@) and data for the arguments,
+  -- where pieces of some of the arguments could be missing
+  GADTData :: TraversableADT adt => adt GrappaData (ADT adt) ->
+              GrappaData (ADT adt)
+
+-- | Test if a piece of data is missing
+isMissingGData :: GrappaData a -> Bool
+isMissingGData GNoData = True
+isMissingGData _ = False
+
+-- | Match 'ADT'-shaped data
+matchADTGData :: TraversableADT adt => GrappaData (ADT adt) ->
+                 (adt GrappaData (ADT adt) -> ret) -> ret -> ret
+matchADTGData GNoData _ ret = ret
+matchADTGData (GData (ADT adt)) k _ = k (mapADT (GData . unId) adt)
+matchADTGData (GADTData adt) k _ = k adt
+
+-- | Match 'ADT'-shaped data
+matchADTGDataMaybe :: TraversableADT adt => GrappaData (ADT adt) ->
+                      Maybe (adt GrappaData (ADT adt))
+matchADTGDataMaybe dv = matchADTGData dv Just Nothing
+
+-- | Convert list data to a list of data elements, with a Boolean flag on the
+-- end indicating if the tail of the list is all missing
+matchADTListData :: GrappaData (GList a) -> ([GrappaData a], Bool)
+matchADTListData d_list =
+  matchADTGData d_list
+  (\adt -> case adt of
+      Nil -> ([], False)
+      Cons d d_list' ->
+        let (ds, flag) = matchADTListData d_list' in
+        (d:ds, flag))
+  ([], True)
+
+-- | Zip two pieces of list data together
+--
+-- FIXME: could be more efficient if we added special cases for 'GData'
+zipGData :: GrappaData (GList a) -> GrappaData (GList b) ->
+            GrappaData (GList (GTuple [a, b]))
+zipGData d1 d2 = helper (matchADTListData d1) (matchADTListData d2) where
+  helper ([], False) _ = GADTData Nil
+  helper _ ([], False) = GADTData Nil
+  helper (x:xs,end1) (y:ys,end2) =
+    GADTData $ Cons (GADTData $ Tuple2 x y) (helper (xs,end1) (ys,end2))
+  helper (x:xs,end1) ([], True) =
+    GADTData $ Cons (GADTData $ Tuple2 x GNoData) (helper (xs,end1) ([], True))
+  helper ([], True) (y:ys,end2) =
+    GADTData $ Cons (GADTData $ Tuple2 GNoData y) (helper ([], True) (ys,end2))
+  helper ([], True) ([], True) = GNoData
+
+
 data SourceFile format = SourceFile
   { sourceFile   :: FilePath
   , sourceFormat :: format
@@ -35,7 +98,7 @@ data SourceFile format = SourceFile
 
 data Source a where
   -- | A fixed piece of data
-  SourceData :: IsAtomic a ~ 'True => a -> Source a
+  SourceData :: a -> Source a
   -- | A "parameter"
   SourceParam :: Source a
   -- | A constructor expression
@@ -44,46 +107,26 @@ data Source a where
   -- | A source file that represents a list-shaped data frame with 2 or more
   -- columns
   SourceReadFileRow ::
-    (FromDataSource fmt rowC fieldC, rowC a, EmbedDistVar a) =>
+    (FromDataSource fmt rowC fieldC, rowC (GrappaData a)) =>
     SourceFile fmt -> Source (GList a)
   -- | A source file that represents a list-shaped data frame with 1 column
   SourceReadFileField ::
-    (FromDataSource fmt rowC fieldC, fieldC a, EmbedDistVar a) =>
+    (FromDataSource fmt rowC fieldC, fieldC (GrappaData a)) =>
     SourceFile fmt -> Source (GList a)
-  SourceBind :: (DistVar a -> Source b) -> Source a -> Source b
+  SourceBind :: (GrappaData a -> Source b) -> Source a -> Source b
 
--- | Type class to turn something into a 'Source', using the identity function
--- if the object is already a 'Source', and using 'SourceData' otherwise
-class Sourceable a b where
-  toSource :: a -> Source b
 
-type family IsSource a where
-  IsSource (Source _a) = 'True
-  IsSource _a = 'False
-
-instance Sourceable (Source a) a where
-  toSource s = s
-
-instance Sourceable (DistVar a) a where
-  toSource VParam = SourceParam
-  toSource (VData x) = SourceData x
-  toSource (VADT adt) = SourceCtor $ mapADT toSource adt
-
-instance (IsSource a ~ 'False, EmbedDistVar a) => Sourceable a a where
-  toSource a = toSource $ embedDistVar a
-
-dvToSource :: DistVar a -> Source a
-dvToSource dv = case dv of
-  VParam -> SourceParam
-  (VData x) -> SourceData x
-  (VADT adt) -> SourceCtor $ mapADT dvToSource adt
-
--- | Map an operation over a 'DistVar' 'GList'
-mapSource :: (DistVar a -> Source b) -> DistVar (GList a) -> Source (GList b)
-mapSource _ VParam = SourceParam
-mapSource _ (VADT Nil) = SourceCtor Nil
-mapSource f (VADT (Cons x xs)) =
+-- | Map a data-to-'Source' operation over a list data
+mapSource :: (GrappaData a -> Source b) -> GrappaData (GList a) ->
+             Source (GList b)
+mapSource _ GNoData = SourceParam
+mapSource _ (GData (ADT Nil)) = SourceCtor Nil
+mapSource _ (GADTData Nil) = SourceCtor Nil
+mapSource f (GData (ADT (Cons (Id x) (Id xs)))) =
+  SourceCtor (Cons (f (GData x)) (mapSource f (GData xs)))
+mapSource f (GADTData (Cons x xs)) =
   SourceCtor (Cons (f x) (mapSource f xs))
+
 
 --
 -- * Reading Data Sources Source DSL Expressions
@@ -101,24 +144,29 @@ getRaw SourceFile { sourceFile = f } = BS.readFile f
 class FromDataSource fmt (rowC :: * -> Constraint)
                          (fieldC :: * -> Constraint)
                          | fmt -> rowC fieldC where
-  fetchSource :: (rowC row, EmbedDistVar row) => SourceFile fmt ->
-                 IO (DistVar (GList row))
+  fetchSource :: rowC (GrappaData row) => SourceFile fmt ->
+                 IO (GrappaData (GList row))
   -- We might need to use a slightly different decoding function if we're trying
   -- to use a data source of something other than tuples, because we need
   -- to account for the 'Only' type as used by SQLite or Cassava or what-have-you
-  fetchSourceField :: (fieldC fld, EmbedDistVar fld) =>
-                      SourceFile fmt -> IO (DistVar (GList fld))
+  fetchSourceField :: fieldC (GrappaData fld) => SourceFile fmt ->
+                      IO (GrappaData (GList fld))
 
--- | Convert a 'V.Vector' to a Grappa variable of list type
-vecToListVar :: EmbedDistVar a => V.Vector a -> DistVar (GList a)
-vecToListVar = F.foldr cons (VADT Nil)
-  where cons x xs = VADT (Cons (embedDistVar x) xs)
+-- | Convert a 'V.Vector' to Grappa data of list type
+--
+-- FIXME: would be more efficient if we used 'GData' when possible
+vecToGData :: V.Vector (GrappaData a) -> GrappaData (GList a)
+vecToGData = F.foldr cons (GADTData Nil)
+  where cons x xs = GADTData (Cons x xs)
 
 -- | Interpret a Source DSL Expression as an 'IO' computation
-interpSource :: Source a -> IO (DistVar a)
-interpSource (SourceData d) = return $ embedDistVar d
-interpSource SourceParam = return VParam
-interpSource (SourceCtor adt) = VADT <$> traverseADT interpSource adt
+--
+-- FIXME: this would be more efficient if we avoided building 'SourceCtor' when
+-- the data is all there; could do this with a 2-continuation monad
+interpSource :: Source a -> IO (GrappaData a)
+interpSource (SourceData d) = return $ GData d
+interpSource SourceParam = return GNoData
+interpSource (SourceCtor adt) = GADTData <$> traverseADT interpSource adt
 interpSource (SourceReadFileRow file) = fetchSource file
 interpSource (SourceReadFileField file) = fetchSourceField file
 interpSource (SourceBind f x) = do
@@ -193,30 +241,24 @@ instance (AllowUnused x1 y1, AllowUnused x2 y2, AllowUnused x3 y3, AllowUnused x
 --
 
 -- Cassava CSV parsing for Grappa pairs
-instance (Csv.FromField a, Csv.FromField b) =>
-         Csv.FromRecord (GTuple '[a, b]) where
-  parseRecord = fmap (\(a,b) -> ADT (Tuple2 (Id a) (Id b))) . Csv.parseRecord
+instance (Csv.FromField (GrappaData a), Csv.FromField (GrappaData b)) =>
+         Csv.FromRecord (GrappaData (GTuple '[a, b])) where
+  parseRecord = fmap (\(a,b) -> GADTData (Tuple2 a b)) . Csv.parseRecord
 
 -- Cassava CSV parsing for Grappa triples
-instance (Csv.FromField a, Csv.FromField b, Csv.FromField c) =>
-         Csv.FromRecord (GTuple '[a, b, c]) where
-  parseRecord = fmap (\(a,b,c) ->
-                       ADT (Tuple3 (Id a) (Id b) (Id c))) . Csv.parseRecord
+instance (Csv.FromField (GrappaData a), Csv.FromField (GrappaData b),
+          Csv.FromField (GrappaData c)) =>
+         Csv.FromRecord (GrappaData (GTuple '[a, b, c])) where
+  parseRecord = fmap (\(a,b,c) -> GADTData (Tuple3 a b c)) . Csv.parseRecord
 
-instance Csv.FromField a => Csv.FromField (Id a) where
-  parseField = fmap Id . Csv.parseField
+-- FIXME HERE: add more instances for tuples
 
-instance (Csv.FromField a, Num a) => Csv.FromField (AD.Forward a) where
-  parseField = fmap AD.auto . Csv.parseField
+instance (IsAtomic a ~ 'True, Csv.FromField a) =>
+         Csv.FromField (GrappaData a) where
+  parseField = fmap GData . Csv.parseField
 
 instance Csv.FromField Unused where
   parseField _ = return Unused
-
--- FIXME HERE: add more instances for tuples
-instance (Csv.FromField a, EmbedDistVar a) => Csv.FromField (DistVar a) where
-  parseField f
-    | f == BS8.pack "" = return VParam
-    | otherwise = fmap embedDistVar (Csv.parseField f)
 
 data CSV = CSV deriving (Eq, Show, Read)
 
@@ -225,43 +267,79 @@ instance FromDataSource CSV Csv.FromRecord Csv.FromField where
     raw <- getRaw src
     case Csv.decode Csv.NoHeader raw of
       Left err -> error err
-      Right vs -> return (vecToListVar vs)
+      Right vs -> return (vecToGData vs)
 
   fetchSourceField src = do
     raw <- getRaw src
     case Csv.decode Csv.NoHeader raw of
       Left err -> error err
-      Right vs -> return (vecToListVar (fmap Csv.fromOnly vs))
+      Right vs -> return (vecToGData (fmap Csv.fromOnly vs))
 
 --
 -- * JSON Format
 --
 
--- FIXME HERE: this should not be the default way to parse DistVars, because we
--- want missing data to become VParam
-instance (Aeson.FromJSON a, EmbedDistVar a) => Aeson.FromJSON (DistVar a) where
-  parseJSON = fmap embedDistVar . Aeson.parseJSON
+-- | Add an empty case to JSON parsing that uses 'VParam' for missing data
+addEmptyJSONCase :: (Aeson.Value -> Aeson.Parser (GrappaData a)) ->
+                    (Aeson.Value -> Aeson.Parser (GrappaData a))
+addEmptyJSONCase _ (Aeson.String str)
+  | (T.unpack str == "_" || str == T.empty) = return GNoData
+addEmptyJSONCase p x = p x
+
+instance {-# OVERLAPPABLE #-}
+  (IsAtomic a ~ 'True, Aeson.FromJSON a) =>
+  Aeson.FromJSON (GrappaData a) where
+  parseJSON = addEmptyJSONCase (fmap GData . Aeson.parseJSON)
+
+instance (IsTypeList ts, Aeson.FromJSON (TupleF ts GrappaData (GTuple ts))) =>
+         Aeson.FromJSON (GrappaData (GTuple ts)) where
+  parseJSON = addEmptyJSONCase (fmap GADTData . Aeson.parseJSON)
+
+-- NOTE: we only add the empty parsing case for tuples at the top level
+
+-- JSON parsing for parsing nullary Grappa tuples
+instance Aeson.FromJSON (TupleF '[] GrappaData r) where
+  parseJSON _ = return Tuple0
+
+-- JSON parsing for parsing unary Grappa tuples
+instance Aeson.FromJSON (GrappaData a) =>
+         Aeson.FromJSON (TupleF '[a] GrappaData r) where
+  parseJSON = fmap (Tuple1) . Aeson.parseJSON
 
 -- JSON parsing for Grappa pairs
-instance (Aeson.FromJSON a, Aeson.FromJSON b) =>
-         Aeson.FromJSON (GTuple '[a, b]) where
-  parseJSON = fmap (\(a,b) -> ADT (Tuple2 (Id a) (Id b))) . Aeson.parseJSON
+instance (Aeson.FromJSON (GrappaData a), Aeson.FromJSON (GrappaData b)) =>
+         Aeson.FromJSON (TupleF '[a, b] GrappaData r) where
+  parseJSON = fmap (\(a,b) -> Tuple2 a b) . Aeson.parseJSON
 
 -- JSON parsing for Grappa triples
-instance (Aeson.FromJSON a, Aeson.FromJSON b, Aeson.FromJSON c) =>
-         Aeson.FromJSON (GTuple '[a, b, c]) where
-  parseJSON = fmap (\(a,b,c) ->
-                     ADT (Tuple3 (Id a) (Id b) (Id c))) . Aeson.parseJSON
+instance (Aeson.FromJSON (GrappaData a), Aeson.FromJSON (GrappaData b),
+          Aeson.FromJSON (GrappaData c)) =>
+         Aeson.FromJSON (TupleF '[a, b, c] GrappaData r) where
+  parseJSON = fmap (\(a,b,c) -> Tuple3 a b c) . Aeson.parseJSON
+
+-- JSON parsing for Grappa quadruples
+instance (Aeson.FromJSON (GrappaData a), Aeson.FromJSON (GrappaData b),
+          Aeson.FromJSON (GrappaData c), Aeson.FromJSON (GrappaData d)) =>
+         Aeson.FromJSON (TupleF '[a, b, c, d] GrappaData r) where
+  parseJSON = fmap (\(a,b,c,d) -> Tuple4 a b c d) . Aeson.parseJSON
+
+-- JSON parsing for Grappa quintuples and more
+instance (Aeson.FromJSON (GrappaData a), Aeson.FromJSON (GrappaData b),
+          Aeson.FromJSON (GrappaData c), Aeson.FromJSON (GrappaData d),
+          Aeson.FromJSON (GrappaData e), IsTypeList ts,
+          Aeson.FromJSON (TupleF ts GrappaData r)) =>
+         Aeson.FromJSON (TupleF (a ': b ': c ': d ': e ': ts) GrappaData r) where
+  parseJSON =
+    fmap (\(a,b,c,d,e,rest) -> TupleN a b c d e rest) . Aeson.parseJSON
 
 -- JSON parsing for Grappa lists
-instance Aeson.FromJSON a => Aeson.FromJSON (GList a) where
-  parseJSON = fmap fromHaskellList . Aeson.parseJSON
+instance Aeson.FromJSON (GrappaData a) =>
+         Aeson.FromJSON (GrappaData (GList a)) where
+  parseJSON =
+    addEmptyJSONCase (fmap vecToGData . Aeson.parseJSON)
 
 instance Aeson.FromJSON Unused where
   parseJSON _ = return Unused
-
--- FIXME HERE: add more instances for tuples
-
 
 
 data JSON = JSON deriving (Eq, Show, Read)
@@ -272,4 +350,4 @@ instance FromDataSource JSON Aeson.FromJSON Aeson.FromJSON where
     raw <- getRaw src
     case Aeson.eitherDecode raw of
       Left err -> error err
-      Right vs -> return (vecToListVar vs)
+      Right vs -> return (vecToGData vs)

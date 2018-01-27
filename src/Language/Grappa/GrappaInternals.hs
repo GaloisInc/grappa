@@ -20,6 +20,11 @@ import Language.Grappa.Distribution
 -- * Representing Grappa Types
 --
 
+-- | A type is "atomic" iff it is not an 'ADT'
+type family IsAtomic a :: Bool where
+  IsAtomic (ADT g) = 'False
+  IsAtomic a = 'True
+
 -- | The Grappa type of distributions. How it is represented depends on the
 -- interpretation being used, so we do not instantiate it to an actual Haskell
 -- type.
@@ -231,86 +236,6 @@ instance ShowADT adt => Show (ADT adt) where
 --
 -- deriving instance (Show (adt f (ADT adt f))) => Show (ADT adt f)
 
---
--- * Grappa Distribution Variables
---
-
--- | A type is "atomic" iff it is not an 'ADT'
-type family IsAtomic a :: Bool where
-  IsAtomic (ADT g) = 'False
-  IsAtomic a = 'True
-
--- | Variables that can be passed into a distribution, which are either "data"
--- variables, which have a value, or "parameter" variables, which do not. For
--- ADT types, "data" variables are actually constructors applied to variables of
--- their argument types.
-data DistVar a where
-  -- | A parameter variable, i.e., a variable without a value
-  VParam :: DistVar a
-  -- | A data variable, i.e., a variable with a value
-  VData :: IsAtomic a ~ 'True => a -> DistVar a
-  -- | An ADT variable, with a head constructor (in @adt@) and a sequence of
-  -- variables for the arguments of that constructor
-  VADT :: TraversableADT adt => adt DistVar (ADT adt) -> DistVar (ADT adt)
-
--- | Helper class for building 'EmbedDistVar' instances without overlapping
-class EmbedDistVarH (b::Bool) a where
-  embedDistVarH :: Proxy b -> a -> DistVar a
-
--- | Typeclass to embed data values into 'DistVar'. This is a sort of
--- well-formedness condition, saying that @a@ can be used with 'DistVar'.
-class EmbedDistVarH (IsAtomic a) a => EmbedDistVar a where { }
-
-instance EmbedDistVarH (IsAtomic a) a => EmbedDistVar a where { }
-
-embedDistVar :: EmbedDistVar a => a -> DistVar a
-embedDistVar (x::a) = embedDistVarH (undefined :: Proxy (IsAtomic a)) x
-
-instance IsAtomic a ~ 'True => EmbedDistVarH 'True a where
-  embedDistVarH _ = VData
-
--- | Helper class for embedding ADT values into 'DistVar'
-class EmbedDistVarADT adt where
-  embedDistVarADT :: adt Id (ADT adt) -> adt DistVar (ADT adt)
-
-instance (EmbedDistVarADT adt, TraversableADT adt) =>
-         EmbedDistVarH 'False (ADT adt) where
-  embedDistVarH _ (ADT adt) = VADT $ embedDistVarADT adt
-
--- | Create a 'DistVar' from a value of any well-formedGrappa type
---
--- FIXME: it would be nice to use this instead of the above stuff...
-typedEmbedDistVar :: GrappaType a => a -> DistVar a
-typedEmbedDistVar x = helper grappaTypeRepr x where
-  helper :: GrappaTypeRepr a -> a -> DistVar a
-  helper (GrappaBaseType _) d = VData d
-  helper (GrappaADTType _) (ADT adt) =
-    VADT $ gmapADT (typedEmbedDistVar . unId) adt
-  helper (GrappaTupleType _) (ADT adt) =
-    VADT $ gmapADT (typedEmbedDistVar . unId) adt
-  helper (GrappaDistType _) d = VData d
-  helper (GrappaArrowType _ _) d = VData d
-
--- | Pattern-match a 'DistVar' at an 'ADT' type, returning either the "body" of
--- the ADT variable, in the case of the 'VADT' constructor, or a default case
--- for a parameter variable
-matchADTDistVar :: adt DistVar (ADT adt) -> DistVar (ADT adt) ->
-                   adt DistVar (ADT adt)
-matchADTDistVar dflt VParam = dflt
-matchADTDistVar _ (VADT adt) = adt
-
--- | Pattern-match a 'DistVar' at an atomic, i.e. non-'ADT', type against a
--- fixed value of that type, returning 'True' if that 'DistVar' is either
--- 'VData' of that fixed value or a 'VParam'
-matchAtomicDistVar :: (Eq a, IsAtomic a ~ 'True) => a -> DistVar a -> Bool
-matchAtomicDistVar _ VParam = True
-matchAtomicDistVar a (VData x) = a == x
-
-mapDistVar :: (IsAtomic a ~ 'True, IsAtomic b ~ 'True)
-           => (a -> b) -> DistVar a -> DistVar b
-mapDistVar _ VParam = VParam
-mapDistVar f (VData x) = VData (f x)
-
 
 --
 -- * Tuple ADTs
@@ -483,23 +408,6 @@ instance MapC Show ts => ShowADT (TupleF ts) where
       "(" ++ show a ++ "," ++ show b ++ "," ++ show c ++ "," ++ show d
       ++ "," ++ show e ++ "," ++ helper rest ++ ")"
 
--- Also need an EmbedDistVarADT instance for each ADT type
-instance MapC EmbedDistVar ts => EmbedDistVarADT (TupleF ts) where
-  embedDistVarADT tup = helper tup where
-    helper :: forall ts' r. MapC EmbedDistVar ts' =>
-              TupleF ts' Id r -> TupleF ts' DistVar r
-    helper Tuple0 = Tuple0
-    helper (Tuple1 (Id a)) = Tuple1 (embedDistVar a)
-    helper (Tuple2 (Id a) (Id b)) =
-      Tuple2 (embedDistVar a) (embedDistVar b)
-    helper (Tuple3 (Id a) (Id b) (Id c)) =
-      Tuple3 (embedDistVar a) (embedDistVar b) (embedDistVar c)
-    helper (Tuple4 (Id a) (Id b) (Id c) (Id d)) =
-      Tuple4 (embedDistVar a) (embedDistVar b) (embedDistVar c) (embedDistVar d)
-    helper (TupleN (Id a) (Id b) (Id c) (Id d) (Id e) rest) =
-      TupleN (embedDistVar a) (embedDistVar b) (embedDistVar c) (embedDistVar d)
-      (embedDistVar e) (helper rest)
-
 
 --
 -- * Boolean ADT
@@ -526,11 +434,6 @@ instance ReifyCtorsADT BoolF where
 instance GrappaADT BoolF where
   gtraverseADT _ TrueF  = pure TrueF
   gtraverseADT _ FalseF = pure FalseF
-
--- Also need an EmbedDistVarADT instance for each ADT type
-instance EmbedDistVarADT BoolF where
-  embedDistVarADT TrueF  = TrueF
-  embedDistVarADT FalseF = FalseF
 
 -- Also need CtorMatchers for each constructor
 ctorMatcher__TrueF :: CtorMatcher BoolF
@@ -586,12 +489,6 @@ instance GrappaType a => GrappaADT (ListF a) where
   gtraverseADT _ Nil = pure Nil
   gtraverseADT f (Cons x xs) = pure Cons <*> f x <*> f xs
 
--- Also need an EmbedDistVarADT instance for each ADT type
-instance EmbedDistVar a => EmbedDistVarADT (ListF a) where
-  embedDistVarADT Nil = Nil
-  embedDistVarADT (Cons (Id x) (Id (ADT xs))) =
-    Cons (embedDistVar x) (VADT $ embedDistVarADT xs)
-
 -- Also need CtorMatchers for each constructor
 ctorMatcher__Nil :: CtorMatcher (ListF a)
 ctorMatcher__Nil =
@@ -612,25 +509,6 @@ type GList a = ADT (ListF a)
 
 instance Show a => ShowADT (ListF a) where
   showADT = show . toList
-
--- | Map an operation over a 'DistVar' 'GList'
-mapDV :: (DistVar a -> DistVar b) -> DistVar (GList a) -> DistVar (GList b)
-mapDV _ VParam = VParam
-mapDV _ (VADT Nil) = VADT Nil
-mapDV f (VADT (Cons x xs)) =
-  VADT (Cons (f x) (mapDV f xs))
-
--- | Zip two 'DistVar' 'GList' values together
-zipDV :: DistVar (GList a) -> DistVar (GList b) -> DistVar (GList (GTuple [a, b]))
-zipDV (VADT Nil) _ = VADT Nil
-zipDV _ (VADT Nil) = VADT Nil
-zipDV (VADT (Cons x xs)) (VADT (Cons y ys)) =
-  VADT (Cons (VADT (Tuple2 x y)) (zipDV xs ys))
-zipDV (VADT (Cons x xs)) VParam =
-  VADT (Cons (VADT (Tuple2 x VParam)) (zipDV xs VParam))
-zipDV VParam (VADT (Cons y ys)) =
-  VADT (Cons (VADT (Tuple2 VParam y)) (zipDV VParam ys))
-zipDV VParam VParam = VParam
 
 listRepeatF :: a -> ADT (ListF a)
 listRepeatF f = x

@@ -98,6 +98,10 @@ mwcNormal mu sigma = random $ MWC.normal mu sigma
 mwcExponential :: Double -> MWCRandM Double
 mwcExponential rate = random $ MWC.exponential rate
 
+-- | Generate a dirichlet-distributed list
+mwcDirichlet :: [R] -> MWCRandM [R]
+mwcDirichlet alphas = random $ MWC.dirichlet alphas
+
 -- | FIXME: documentation!
 parMapM :: (a -> MWCRandM b) -> [a] -> MWCRandM [b]
 parMapM f xs =

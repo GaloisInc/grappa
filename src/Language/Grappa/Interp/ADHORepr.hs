@@ -193,9 +193,50 @@ abstractADStmt :: ADR.Reifies s ADR.Tape =>
                   GStmt (ADHOReprRet m s) a -> GStmt (ADHORepr m f) a
 abstractADStmt e = GStmt $ ADStmt $ \_ -> coerceSArg Proxy Proxy e
 
+-- | Similar to 'applyADExpr' but for v-expressions (which is needed because
+-- v-expressions could contain expressions)
+applyADVExpr :: ADR.Reifies s ADR.Tape => f (ADR.Reverse s Double) ->
+                GVExpr (ADHORepr m f) a -> GVExpr (ADHOReprRet m s) a
+applyADVExpr _ (GVExpr VParam) = GVExpr VParam
+applyADVExpr _ (GVExpr (VData d)) = GVExpr $ VData d
+applyADVExpr r (GVExpr (VExpr e)) = GVExpr $ VExpr $ applyADExpr r e
+applyADVExpr r (GVExpr (VADT adt)) =
+  GVExpr $ VADT $ mapADT (unGVExpr . applyADVExpr r . GVExpr) adt
+
+-- | Similar to 'abstractADExpr' but for v-expressions (which is needed because
+-- v-expressions could contain expressions)
+abstractADVExpr :: ADR.Reifies s ADR.Tape =>
+                   GVExpr (ADHOReprRet m s) a -> GVExpr (ADHORepr m f) a
+abstractADVExpr (GVExpr VParam) = GVExpr VParam
+abstractADVExpr (GVExpr (VData d)) = GVExpr $ VData d
+abstractADVExpr (GVExpr (VExpr e)) = GVExpr $ VExpr $ abstractADExpr e
+abstractADVExpr (GVExpr (VADT adt)) =
+  GVExpr $ VADT $ mapADT (unGVExpr . abstractADVExpr . GVExpr) adt
+
+{-
+-- | Helper to match on v-expressions in 'ADHORepr': if the 'DistVar' is not a
+-- 'VParam', then destructure it and pass it to the continuation (the 2nd
+-- argument); otherwise, return the failure continuation (the 3rd argument)
+matchADHOReprADTDistVar ::
+  TraversableADT adt =>
+  DistVar (ADHORepr m f) (ADT adt) ->
+  (adt (DistVar (ADHORepr m f)) (ADT adt) -> GStmt (ADHORepr m f) b) ->
+  GStmt (ADHORepr m f) b ->
+  GStmt (ADHORepr m f) b
+matchADHOReprADTDistVar VParam _ ret = ret
+matchADHOReprADTDistVar (VData (GData (ADT adt))) k _ =
+  k $ mapADT (VData . GData . unId) adt
+matchADHOReprADTDistVar (VData GNoData) _ ret = ret
+matchADHOReprADTDistVar (VData (GADTData adt)) k _ = k $ mapADT VData adt
+matchADHOReprADTDistVar (VExpr e) k _ =
+  GStmt $ ADStmt $ \r ->
+  applyADStmt r $ k $ mapADT abstractADExpr $ unGExpr (applyADExpr r e)
+matchADHOReprADTDistVar (VADT adt) k _ = k adt
+-}
+
 
 instance Monad m => ValidRepr (ADHORepr m f) where
-  type GVExprRepr (ADHORepr m f) a = DistVar a
+  type GVExprRepr (ADHORepr m f) a = DistVar (ADHORepr m f) a
   type GStmtRepr (ADHORepr m f) a = ADStmt m f a
 
   interp__'projTupleStmt tup k =
@@ -205,38 +246,38 @@ instance Monad m => ValidRepr (ADHORepr m f) where
 
   interp__'vInjTuple !tup =
     GVExpr (VADT $ mapADT unGVExpr tup)
-  interp__'vProjTuple (GVExpr (VADT !tup)) k =
-    k $ mapADT GVExpr tup
-  interp__'vProjTuple (GVExpr VParam) k =
-    k $ mapADT (\ _ -> GVExpr VParam) typeListProxy
+  interp__'vProjTuple ve k =
+    GStmt $ ADStmt $ \r ->
+    (interp__'vProjTuple (applyADVExpr r ve)
+     (applyADStmt r . k . mapADT abstractADVExpr))
 
   interp__'vwild k = k (GVExpr VParam)
-  interp__'vlift _ _ = error "FIXME HERE: interp__'vlift"
+  interp__'vlift e k = k (GVExpr $ VExpr e)
 
   interp__'return x = GStmt $ ADStmt $ \r -> interp__'return $ applyADExpr r x
   interp__'let rhs body =
     GStmt $ ADStmt $ \r ->
     interp__'let (applyADExpr r rhs) (applyADStmt r . body . abstractADExpr)
-  interp__'sample d (GVExpr dv) k =
+  interp__'sample d ve k =
     GStmt $ ADStmt $ \r ->
-    interp__'sample (applyADExpr r d) (GVExpr dv)
+    interp__'sample (applyADExpr r d) (applyADVExpr r ve)
     (applyADStmt r . k . abstractADExpr)
   interp__'mkDist f =
     GExpr $ ADExpr $ \r ->
-    interp__'mkDist (applyADStmt r . f . GVExpr . unGVExpr)
+    interp__'mkDist (applyADStmt r . f . abstractADVExpr)
 
 
 instance (Monad m, TraversableADT adt) => Interp__ADT (ADHORepr m f) adt where
   interp__'vInjADT adt = GVExpr (VADT $ mapADT unGVExpr adt)
-  interp__'vProjMatchADT (GVExpr VParam) ctor _ k_succ _ =
-    k_succ (mapADT (const $ GVExpr VParam) ctor)
-  interp__'vProjMatchADT (GVExpr (VADT adt)) _ matcher k_succ k_fail =
-    if applyCtorMatcher matcher adt then
-      k_succ (mapADT GVExpr adt)
-    else k_fail
+  interp__'vProjMatchADT ve ctor matcher k_succ k_fail =
+    GStmt $ ADStmt $ \r ->
+    interp__'vProjMatchADT (applyADVExpr r ve) ctor matcher
+    (applyADStmt r . k_succ . mapADT abstractADVExpr)
+    (applyADStmt r k_fail)
 
 instance Interp__'source (ADHORepr m f) a where
-  interp__'source src = GVExpr <$> interpSource src
+  interp__'source src =
+    GVExpr . VData <$> interpSource src
 
 
 ----------------------------------------------------------------------
