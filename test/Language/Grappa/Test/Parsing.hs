@@ -31,7 +31,7 @@ runCase c = it (description c) $
 --
 
 fun n cs = FunDecl n Nothing cs
-model n cs = ModelDecl n Nothing cs
+model n cs = FunDecl n Nothing [FunCase [] ModelExp cs]
 
 sample x y r = SampleStmt x y r
 ret = ReturnStmt
@@ -62,7 +62,6 @@ basicModel = ParserCase
   , input = "model mapp { n } = n ~ d\n"
   , output =
       [ model "mapp"
-        [ ModelCase []
-          [ ModelSubCase (varP "n") Nothing
-            (sample (varV "n") (varE "d") ret) ]]]
+          [ ModelCase (varP "n") Nothing
+            (sample (varV "n") (varE "d") ret) ]]
   }

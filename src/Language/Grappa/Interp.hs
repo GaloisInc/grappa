@@ -177,6 +177,12 @@ interp__'matchDisj :: GMatch repr a -> GMatch repr a -> GMatch repr a
 interp__'matchDisj (GMatch m1) (GMatch m2) =
   GMatch $ \k_fail -> m1 (m2 k_fail)
 
+-- | Build a @case@ expression body with a Boolean guard
+interp__'matchGuard :: Interp__'ifThenElse repr => GExpr repr Bool ->
+                       GMatch repr a -> GMatch repr a
+interp__'matchGuard g (GMatch m) =
+  GMatch $ \k_fail -> interp__'ifThenElse g (m k_fail) k_fail
+
 -- | Build a @case@ expression body that matches on a tuple
 interp__'matchTuple ::
   (ValidExprRepr repr, IsTypeList ts) =>
@@ -242,15 +248,31 @@ newtype GVMatchOne repr a =
   GVMatchOne { unGVMatchOne ::
                  (Maybe (GStmt repr a) -> GStmt repr a) -> GStmt repr a }
 
+-- | Build a pattern-matching statement from a @case@ statement body with only
+-- one alternative
+interp__'vmatch1 :: GVMatchOne repr a -> GStmt repr a
+interp__'vmatch1 (GVMatchOne m) = m helper where
+  helper (Just stmt) = stmt
+  helper Nothing = error "Model case did not match input!"
+
+-- | Collect the requirements for 'interp__'vmatch' into a single typeclass
+class (Interp__categorical repr, Interp__'intSwitch repr,
+       Interp__'integer repr Prob, Interp__'integer repr Int,
+       Interp__'plus repr Prob, Interp__'div repr Prob,
+       Interp__ADT__Expr repr (ListF Prob)) =>
+      Interp__'vmatch repr where
+
+instance (Interp__categorical repr, Interp__'intSwitch repr,
+          Interp__'integer repr Prob, Interp__'integer repr Int,
+          Interp__'plus repr Prob, Interp__'div repr Prob,
+          Interp__ADT__Expr repr (ListF Prob)) =>
+         Interp__'vmatch repr where
+
 -- | Build a pattern-matching statement from a @case@ statement body
-interp__'vmatch :: (ValidRepr repr, Interp__categorical repr,
-                    Interp__'intSwitch repr,
-                    Interp__'integer repr Prob, Interp__'integer repr Int,
-                    Interp__'plus repr Prob, Interp__'div repr Prob,
-                    Interp__ADT__Expr repr (ListF Prob)) =>
-                   GVMatch repr a -> GStmt repr a
+interp__'vmatch :: Interp__'vmatch repr => GVMatch repr a -> GStmt repr a
 interp__'vmatch (GVMatch m) = m helper where
   -- helper :: [(GExpr repr Prob, Maybe (GStmt repr a))] -> GStmt repr a
+  helper [] = error "interp__'vmatch: no cases in model!"
   helper ps_ms =
     -- Extract the probability exprs for the cases that do and don't match, and
     -- also get those cases that do match
@@ -306,6 +328,12 @@ interp__'vmatchDisj p (GVMatchOne m1) (GVMatch m2) =
   GVMatch $ \k1 ->
   m1 (\maybe_s -> m2 (\ps_ms -> k1 ((p, maybe_s) : ps_ms)))
 
+-- | Build a @case@ statement branch with a Boolean guard
+interp__'vmatchGuard :: Interp__'ifThenElseStmt repr => GExpr repr Bool ->
+                        GVMatchOne repr a -> GVMatchOne repr a
+interp__'vmatchGuard g (GVMatchOne m) =
+  GVMatchOne $ \k_fail -> interp__'ifThenElseStmt g (m k_fail) (k_fail Nothing)
+
 -- | Build a @case@ statement branch that matches on a tuple
 interp__'vmatchTuple ::
   (ValidRepr repr, IsTypeList ts) =>
@@ -353,13 +381,17 @@ class (ValidRepr repr, Interp__ADT__Expr repr adt) =>
 -- * Interpreting Boolean Expressions
 ----------------------------------------------------------------------
 
-class (ValidExprRepr repr) => Interp__'ifThenElse repr where
+class ValidExprRepr repr => Interp__'ifThenElse repr where
   interp__'ifThenElse :: GExpr repr Bool -> GExpr repr a -> GExpr repr a ->
                          GExpr repr a
 
+class ValidRepr repr => Interp__'ifThenElseStmt repr where
+  interp__'ifThenElseStmt :: GExpr repr Bool -> GStmt repr a -> GStmt repr a ->
+                             GStmt repr a
+
 -- | Class for interpreting a form of @switch@ statement over 'Int' expressions,
 -- which returns the @i@th expression for 'Int' @i@
-class (ValidRepr repr) => Interp__'intSwitch repr where
+class ValidRepr repr => Interp__'intSwitch repr where
   interp__'intSwitch :: GExpr repr Int -> [GStmt repr a] -> GStmt repr a
 
 class (ValidExprRepr repr) => Interp__not repr where

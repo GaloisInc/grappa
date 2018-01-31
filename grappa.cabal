@@ -64,7 +64,7 @@ library
                      , Language.Grappa.Frontend.Resolve
                      , Language.Grappa.Frontend.FixupOps
                      , Language.Grappa.Frontend.TypeCheck
-                     , Language.Grappa.Frontend.Matching
+                     -- , Language.Grappa.Frontend.Matching
                      , Language.Grappa.Frontend.Compile
                      -- , Language.Grappa.Frontend.Test
                      , Language.Grappa.Frontend.DataSource

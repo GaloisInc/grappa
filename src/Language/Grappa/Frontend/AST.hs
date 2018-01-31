@@ -76,7 +76,6 @@ data CompilerPhase
   | ResolvedNamesPhase
   | PreTypedPhase
   | TypedPhase
-  | RewrittenPhase
     deriving (Eq, Show)
 
 -- These aliases let us avoid the tick and also keep
@@ -85,7 +84,6 @@ type Raw           = 'RawPhase
 type ResolvedNames = 'ResolvedNamesPhase
 type PreTyped      = 'PreTypedPhase
 type Typed         = 'TypedPhase
-type Rewritten     = 'RewrittenPhase
 
 -- | @'GName' p@ is the type we use to represent global names: it
 -- starts as a raw identifier, and after the resolution phase also
@@ -138,7 +136,6 @@ type family SrcVarName (p :: CompilerPhase) :: * where
 -- phase.
 type family TypeAnnot (p :: CompilerPhase) :: * where
   TypeAnnot Typed     = TypeP TypedType
-  TypeAnnot Rewritten = TypeP TypedType
   TypeAnnot other     = ()
 
 -- | @'DeclTypeAnnot' p@ is the type of type annotations on top-level
@@ -147,34 +144,7 @@ type family TypeAnnot (p :: CompilerPhase) :: * where
 -- type-checking.
 type family DeclTypeAnnot (p :: CompilerPhase) :: * where
   DeclTypeAnnot Typed     = TopTypeP TypedType
-  DeclTypeAnnot Rewritten = TopTypeP TypedType
   DeclTypeAnnot other = Maybe (TopTypeP (GetTypePhase other))
-
--- | @'GetHasModels' p@ tells us whether our AST still has 'ModelDecl'
--- values. We compile these away after rewriting pattern-matching, so
--- our final steps shouldn't have to worry about these.
-type family GetHasModels (p :: CompilerPhase) :: Bool where
-  GetHasModels Rewritten = 'False
-  GetHasModels other     = 'True
-
--- | @'ModelsEnabled' p@ is a type that is only inhabited if we have
--- model declarations in the AST. By including a value of this type in
--- an AST node, that node becomes impossible to contain that node
--- after desugaring.
-type ModelsEnabled p = Enabled (GetHasModels p)
-
--- | @'Pattern' p@ is the type of patterns at that phase in the
--- compiler. Prior to the 'Rewritten' phase, this will be recursive
--- tree structure, but after that, it'll be a non-recursive type, as
--- nested patterns will have been rewritten into nested cases.
-type family Pattern (p :: CompilerPhase) :: * where
-  Pattern Rewritten = CompiledPattern Rewritten
-  Pattern p         = RawPattern p
-
-
-type family TopPattern (p :: CompilerPhase) :: * where
-  TopPattern Rewritten = CompiledVarPattern Rewritten
-  TopPattern p         = RawPattern p
 
 type family InferenceMethodName (p :: CompilerPhase) :: * where
   InferenceMethodName Raw   = Ident
@@ -230,8 +200,6 @@ type PhaseC (c :: * -> Constraint) p =
   , c (SrcVarName p)
   , c (TypeAnnot p)
   , c (DeclTypeAnnot p)
-  , c (Pattern p)
-  , c (TopPattern p)
   , c (InferenceMethodName p)
   , TypePhaseC c (GetTypePhase p)
   )
@@ -284,10 +252,16 @@ data ClassConstrP p
     -- ^ Constraint stating that a Haskell function or operator can be
     -- interpreted at the given type(s) in the current representation. The name
     -- used is of the form @Interp__XXX@ where @XXX@ is a conversion of the
-    -- operator name to a valid Haskell identifier.
+    -- operator name to a valid Haskell identifier. The corresponding Haskell
+    -- type constraint is @Interp__XXX repr a1 .. an@, where @repr@ is a type
+    -- variable for the current representation and the @ai@ are the types in the
+    -- type list.
   | InterpADTConstr (TypeName p) [TypeP p]
     -- ^ An 'Interp__ADT' constraint, stating that the given Grappa ADT type can
-    -- be interpreted in a particular representation
+    -- be interpreted in a particular representation. The corresponding Haskell
+    -- type constraint is of the form @Interp__ADT repr a1 .. an@, where @repr@
+    -- is a type variable for the current representation and the @ai@ are the
+    -- types in the type list.
 
 deriving instance TypePhaseC Eq p => Eq (ClassConstrP p)
 deriving instance TypePhaseC Ord p => Ord (ClassConstrP p)
@@ -335,11 +309,11 @@ interpIdent t = T.pack "interp__" `T.append` T.concatMap go t
         go '~' = T.pack "'tld"
         go c   = T.singleton c
 
+-- | Top-level declarations
 data Decl p
-  = ModelDecl Ident (DeclTypeAnnot p) [ModelCase p]
-    -- ^ A model is given a name, a type, and a set of cases
-  | FunDecl Ident (DeclTypeAnnot p) [FunCase p]
-    -- ^ A function is given a name, a type, and a set of cases
+  = FunDecl Ident (DeclTypeAnnot p) [FunCase p]
+    -- ^ A function (or model, which is represented as a function that returns
+    -- an anonymous model) has a name, a type, and a set of cases
   | SourceDecl Ident (TypeP (GetTypePhase p)) (SourceExp p)
     -- ^ A source declaration is a name, a type, and a source expression
   | MainDecl (GPriorStmt p) (InfMethod p)
@@ -349,42 +323,24 @@ data InfMethod p = InfMethod
   , infParams :: [Exp p]
   }
 
-data ModelCase p =
-  ModelCase [Pattern p] [ModelSubCase p]
-  -- ^ A model case is a list of patterns for the arguments of a model followed
-  -- by a list of sub-cases
+-- | A model case determines a probabilistic computation for a portion of the
+-- input space of a model. It is given as a pattern for the portion of the input
+-- space it covers, an expression giving the probability of this particular
+-- case, and a 'Stmt' describing the distribution for this case.
+data ModelCase p = ModelCase (Pattern p) (Exp p) (Stmt p)
 
-data ModelSubCase p =
-  ModelSubCase (Pattern p) (Maybe (Exp p)) (Stmt p)
-  -- ^ A model sub-case is a pattern for the probabilistically generated
-  -- argument, an optional expression giving the probability of this particular
-  -- sub-case, and a 'Stmt' describing the distribution for this sub-case
+-- | A case branch for a function definition, which contains a list of patterns
+-- for the @N@ arguments of the function followed by the body of the function
+-- for that particular branch
+data FunCase p = FunCase [Pattern p] (Exp p)
 
-data FunCase p = FunCase [TopPattern p] (Exp p)
-
--- | A 'RawPattern' is what we get out of our AST
-data RawPattern p
+data Pattern p
   = VarPat Ident (TypeAnnot p)
   | WildPat (TypeAnnot p)
-  | CtorPat (CtorName p) [RawPattern p] (TypeAnnot p)
-  | TuplePat [RawPattern p] (TypeAnnot p)
+  | CtorPat (CtorName p) [Pattern p] (TypeAnnot p)
+  | TuplePat [Pattern p] (TypeAnnot p)
   | LitPat Literal (TypeAnnot p)
-  | SigPat (RawPattern p) (TypeP (GetTypePhase p))
-
--- | A pattern that is either a binder or a wildcard.
-data CompiledVarPattern p
-  = VarCPat Ident (TypeAnnot p)
-  | WildCPat (TypeAnnot p)
-
--- | A 'CompiledPattern' is a pattern that cannot contain nested
--- pattern matches other than variables and wildcards. Eventually, we
--- rewrite all pattern-matching as nested cases, so the older pattern
--- type is much more complicated than we need at that point.
-data CompiledPattern p
-  = CompiledTuplePat [CompiledVarPattern p] (TypeAnnot p)
-  | CompiledCtorPat (CtorName p) [CompiledVarPattern p] (TypeAnnot p)
-  | CompiledLitPat Literal (TypeAnnot p)
-  | CompiledBasicPattern (CompiledVarPattern p)
+  | SigPat (Pattern p) (TypeP (GetTypePhase p))
 
 data StmtCase p = StmtCase (Pattern p) (Stmt p) (TypeAnnot p)
 
@@ -407,10 +363,9 @@ data Exp p
   | ListExp (SugarEnabled p) [Exp p]
   | LetExp Ident (TypeAnnot p) (Exp p) (Exp p) (TypeAnnot p)
   | CaseExp (Exp p) [ExpCase p] (TypeAnnot p)
-  | ModelExp [ModelSubCase p] (TypeAnnot p)
   | IfExp (Exp p) (Exp p) (Exp p) (TypeAnnot p)
   | FunExp (FunCase p) (TypeAnnot p)
-    -- ^ Anonymous model expression
+  | ModelExp [ModelCase p] (TypeAnnot p)
 
 -- | Expressions that can occur on the left-hand side of a sample statement
 data VExp p
@@ -439,10 +394,6 @@ data SourceExp p
   | ListCompSrcExp (SourceExp p) [ListCompArm p] (TypeAnnot p)
 
 -- | A 'ListCompArm' is a binding of the form @Pattern <- GenExp@
---
--- FIXME: this should use a 'RawPattern' instead of a 'Pattern', since there is
--- no way (and no need!) to decompose patterns in list comprehensions into
--- 'CompiledPattern's
 data ListCompArm p = ListCompArm (Pattern p) (GenExp p)
 
 -- | A 'GenExp' is something which can be used in generating a list
@@ -473,12 +424,9 @@ deriving instance PhaseC Show p => Show (ExpCase p)
 deriving instance PhaseC Show p => Show (StmtCase p)
 deriving instance PhaseC Show p => Show (Stmt p)
 deriving instance PhaseC Show p => Show (GPriorStmt p)
-deriving instance PhaseC Show p => Show (RawPattern p)
-deriving instance PhaseC Show p => Show (CompiledPattern p)
-deriving instance PhaseC Show p => Show (CompiledVarPattern p)
+deriving instance PhaseC Show p => Show (Pattern p)
 deriving instance PhaseC Show p => Show (FunCase p)
 deriving instance PhaseC Show p => Show (ModelCase p)
-deriving instance PhaseC Show p => Show (ModelSubCase p)
 deriving instance PhaseC Show p => Show (Decl p)
 deriving instance PhaseC Show p => Show (InfMethod p)
 
@@ -493,10 +441,9 @@ deriving instance Eq (ExpCase Raw)
 deriving instance Eq (StmtCase Raw)
 deriving instance Eq (Stmt Raw)
 deriving instance Eq (GPriorStmt Raw)
-deriving instance Eq (RawPattern Raw)
+deriving instance Eq (Pattern Raw)
 deriving instance Eq (FunCase Raw)
 deriving instance Eq (ModelCase Raw)
-deriving instance Eq (ModelSubCase Raw)
 deriving instance Eq (Decl Raw)
 deriving instance Eq (InfMethod Raw)
 
@@ -518,13 +465,6 @@ instance PP.Pretty TH.Name where
   pretty = ppTHName
 
 instance PhaseC PP.Pretty p => PP.Pretty (Decl p) where
-  pretty (ModelDecl n _ cases) =
-    PP.vcat (PP.text "model" <+> PP.text (T.unpack n) : concat
-             [ [ PP.nest 2 (PP.hsep (map PP.pretty ps))
-               , PP.nest 4 (PP.vcat (map PP.pretty scs))
-               ]
-             | ModelCase ps scs <- cases
-             ])
   pretty (FunDecl n _ cs) =
     PP.vcat (PP.text "fun" <+> PP.text (T.unpack n) : concat
              [ [ PP.nest 2 $ PP.hsep (map PP.pretty ps) <+> PP.char '='
@@ -542,16 +482,11 @@ instance PhaseC PP.Pretty p => PP.Pretty (FunCase p) where
     PP.sep (map PP.pretty pats) <+> PP.char '=' <+> PP.pretty expr
 
 ppDeclShort :: Decl p -> PP.Doc
-ppDeclShort (ModelDecl n _ _) = PP.text "model" <+> PP.text (T.unpack n)
 ppDeclShort (FunDecl n _ _) = PP.text "fun" <+> PP.text (T.unpack n)
 ppDeclShort (SourceDecl n _ _) = PP.text "source" <+> PP.text (T.unpack n)
 ppDeclShort (MainDecl _ _) = PP.text "main" <+> PP.text "..."
 
-instance PhaseC PP.Pretty p => PP.Pretty (ModelCase p) where
-  pretty (ModelCase ps cs) =
-    PP.sep (map PP.pretty ps) <+> (PP.sep (map PP.pretty cs))
-
-instance PhaseC PP.Pretty p => PP.Pretty (RawPattern p) where
+instance PhaseC PP.Pretty p => PP.Pretty (Pattern p) where
   pretty (VarPat n _) = PP.text (T.unpack n)
   pretty (WildPat _) = PP.char '_'
   pretty (CtorPat n ps _) =
@@ -563,26 +498,11 @@ instance PhaseC PP.Pretty p => PP.Pretty (RawPattern p) where
   pretty (SigPat patt tp) =
     PP.sep [PP.pretty patt, PP.text "::", PP.pretty tp]
 
-instance PhaseC PP.Pretty p => PP.Pretty (CompiledPattern p) where
-  pretty (CompiledBasicPattern p) = PP.pretty p
-  pretty (CompiledCtorPat n ps _) =
-    PP.pretty n <+> PP.sep (map PP.pretty ps)
-  pretty (CompiledTuplePat ps _) =
-    PP.char '(' <> PP.sep (PP.punctuate (PP.char ',') (map PP.pretty ps))
-    <> PP.char ')'
-  pretty (CompiledLitPat l _) = PP.pretty l
-
-instance PP.Pretty (CompiledVarPattern p) where
-  pretty (VarCPat n _) = PP.text (T.unpack n)
-  pretty (WildCPat _) = PP.char '_'
-
-instance PhaseC PP.Pretty p => PP.Pretty (ModelSubCase p) where
-  pretty (ModelSubCase pat gd bd) =
-    withBody (PP.braces (PP.pretty pat <+> ppGuard) <+> PP.char '=')
-    where ppGuard = case gd of
-            Nothing -> PP.text ""
-            Just ee -> PP.char '|' <+> PP.pretty ee
-          withBody hd = case bd of
+instance PhaseC PP.Pretty p => PP.Pretty (ModelCase p) where
+  pretty (ModelCase pat gd bd) =
+    withBody (PP.braces (PP.pretty pat <+> PP.char '|' <+> PP.pretty gd)
+              <+> PP.char '=')
+    where withBody hd = case bd of
             ReturnStmt -> hd <+> PP.text "nothing"
             ss         -> hd PP.<$$> PP.nest 2 (PP.pretty ss)
 
@@ -1206,104 +1126,6 @@ buildBaseCtorInfo base_tp base_ctor =
              ctor_type = top_tp,
              ctor_is_adt = False }
 
-fullyRenameVExpr :: RenameVar t => Ident -> Exp Typed -> VExp Typed -> t -> t
-fullyRenameVExpr i e ve r =
-  renameVar i e (renameVExpr i ve r)
-
-class RenameVar t where
-  renameVar :: Ident -> Exp Typed -> t -> t
-  renameVExpr :: Ident -> VExp Typed -> t -> t
-
-instance RenameVar (Exp Typed) where
-  renameVar v v' = go
-    where go (NameExp (LocalName i) _)
-            | v == i = v'
-          go (NameExp n t) = NameExp n t
-          go (SigExp e t) = SigExp (go e) t
-          go (AppExp e es t) = AppExp (go e) (map go es) t
-          go (TupleExp es t) = TupleExp (map go es) t
-          go (OpExp en e1 n e2) = OpExp en (fmap go e1) n (go e2)
-          go (ParensExp en e) = ParensExp en (go e)
-          go (ListExp en es) = ListExp en (map go es)
-          go (LetExp i t e1 e2 t')
-            | v /= i    = LetExp i t (go e1) (go e2) t'
-            | otherwise = LetExp i t (go e1) e2 t'
-          go (CaseExp e es t) = CaseExp (go e) (map (renameVar v v') es) t
-          go (ModelExp cs t) = ModelExp (renameVar v v' cs) t
-          go (LiteralExp l t) = LiteralExp l t
-          go (IfExp c t e tp) =
-            IfExp (go c) (go t) (go e) tp
-          go (FunExp (FunCase ps e) tp)
-            | v `elem` foldMap patternVars ps = FunExp (FunCase ps e) tp
-            | otherwise = FunExp (FunCase ps (go e)) tp
-  renameVExpr v v' (ModelExp cs t) =
-    ModelExp (renameVExpr v v' cs) t
-  renameVExpr _ _ t = t
-
-instance RenameVar (VExp Typed) where
-  renameVExpr v v' ve@(VarVExp i _ _)
-    | i == v = v'
-    | otherwise = ve
-  renameVExpr _ _  (WildVExp t) = WildVExp t
-  renameVExpr v v' (CtorVExp n vs t) =
-    CtorVExp n (renameVExpr v v' vs) t
-  renameVExpr v v' (TupleVExp vs t) =
-    TupleVExp (renameVExpr v v' vs) t
-  renameVExpr v v' (SigVExp ve t) =
-    SigVExp (renameVExpr v v' ve) t
-  renameVExpr v v' (EmbedVExp e t) =
-    EmbedVExp (renameVExpr v v' e) t
-
-  renameVar v v' (EmbedVExp e t) =
-    EmbedVExp (renameVar v v' e) t
-  renameVar _ _ t = t
-
-instance RenameVar (ExpCase Typed) where
-  renameVar v v' (ExpCase pat expr t1 t2) =
-    ExpCase pat (renameVar v v' expr) t1 t2
-
-  renameVExpr v v' (ExpCase pat expr t1 t2) =
-    ExpCase pat (renameVExpr v v' expr) t1 t2
-
-instance RenameVar (ModelSubCase Typed) where
-  renameVar v v' (ModelSubCase pat expr stmt)
-    | v `elem` patternVars pat =
-      ModelSubCase pat expr stmt
-    | otherwise =
-      ModelSubCase pat (fmap (renameVar v v') expr) (renameVar v v' stmt)
-  renameVExpr v v' (ModelSubCase pat expr stmt)
-    | v `elem` patternVars pat =
-      ModelSubCase pat expr stmt
-    | otherwise =
-      ModelSubCase pat (fmap (renameVExpr v v') expr) (renameVExpr v v' stmt)
-
-instance RenameVar (Stmt Typed) where
-  renameVar _ _  ReturnStmt = ReturnStmt
-  renameVar v v' (SampleStmt ve e s) =
-    SampleStmt ve (renameVar v v' e) (renameVar v v' s)
-  renameVar v v' (LetStmt i e s)
-    | v == i    = LetStmt i (renameVar v v' e) (renameVar v v' s)
-    | otherwise = LetStmt i (renameVar v v' e) (renameVar v v' s)
-  renameVar v v' (CaseStmt e es) =
-    CaseStmt (renameVar v v' e) (map (renameVar v v') es)
-
-  renameVExpr _ _ ReturnStmt = ReturnStmt
-  renameVExpr v v' (SampleStmt ve e s) =
-    SampleStmt (renameVExpr v v' ve) (renameVExpr v v' e) (renameVExpr v v' s)
-  renameVExpr v v' (LetStmt i e s) =
-    LetStmt i (renameVExpr v v' e) (renameVExpr v v' s)
-  renameVExpr v v' (CaseStmt e es) =
-    CaseStmt (renameVExpr v v' e) (renameVExpr v v' es)
-
-instance RenameVar (StmtCase Typed) where
-  renameVar v v' (StmtCase pat stmt t) =
-    StmtCase pat (renameVar v v' stmt) t
-  renameVExpr v v' (StmtCase pat stmt t) =
-    StmtCase pat (renameVExpr v v' stmt) t
-
-instance RenameVar t => RenameVar [t] where
-  renameVar v v' xs = map (renameVar v v') xs
-  renameVExpr v v' xs = map (renameVExpr v v') xs
 
 --
 -- * Operations on Declarations, Statements, and Expressions
@@ -1311,27 +1133,22 @@ instance RenameVar t => RenameVar [t] where
 
 -- | Get the identifier name of a top-level declaration
 declName :: Decl p -> Ident
-declName (ModelDecl nm _ _) = nm
 declName (FunDecl nm _ _) = nm
 declName (SourceDecl nm _ _) = nm
 declName (MainDecl _ _) = T.pack "main"
 
 -- | Get the type of a top-level declaration
 declType :: Decl p -> DeclTypeAnnot p
-declType (ModelDecl _ annot _) = annot
 declType (FunDecl _ annot _) = annot
 declType (SourceDecl _ _ _) = error "[unreachable]"
 declType (MainDecl _ _) = error "[unreachable]"
 
 
-modelCaseArity :: ModelCase p -> Int
-modelCaseArity (ModelCase args _) = length args
-
 funCaseArity :: FunCase p -> Int
 funCaseArity (FunCase args _) = length args
 
 -- | Get the type annotation of a pattern
-patternType :: RawPattern p -> TypeAnnot p
+patternType :: Pattern p -> TypeAnnot p
 patternType (VarPat _ tp) = tp
 patternType (WildPat tp) = tp
 patternType (CtorPat _ _ tp) = tp
@@ -1343,7 +1160,7 @@ patternType (SigPat patt _) =
   patternType patt
 
 -- | Get the variables bound in a pattern
-patternVars :: RawPattern p -> Set Ident
+patternVars :: Pattern p -> Set Ident
 patternVars (VarPat x _) = Set.singleton x
 patternVars (WildPat _) = Set.empty
 patternVars (CtorPat _ patts _) =
@@ -1376,3 +1193,43 @@ applyExp f args = AppExp f args ()
 -- | Call 'applyExp' with just one argument
 applyExp1 :: TypeAnnot p ~ () => Exp p -> Exp p -> Exp p
 applyExp1 f arg = applyExp f [arg]
+
+
+-- | Class for getting the type of expressions and related constructs
+class TypeOf t where
+  typeOf :: t Typed -> Type
+
+instance TypeOf Exp where
+  typeOf (NameExp _ t) = t
+  typeOf (LiteralExp _ t) = t
+  typeOf (SigExp _ t) = t
+  typeOf (AppExp _ _ t) = t
+  typeOf (TupleExp _ t) = t
+  typeOf (OpExp not_en _ _ _) = notEnabled not_en
+  typeOf (ParensExp not_en _) = notEnabled not_en
+  typeOf (ListExp not_en _) = notEnabled not_en
+  typeOf (LetExp _ _ _ _ t) = t
+  typeOf (CaseExp _ _ t) = t
+  typeOf (IfExp _ _ _ t) = t
+  typeOf (FunExp _ t) = t
+  typeOf (ModelExp _ t) = t
+
+instance TypeOf Pattern where
+  typeOf (VarPat _ tp) = tp
+  typeOf (WildPat tp) = tp
+  typeOf (CtorPat _ _ tp) = tp
+  typeOf (TuplePat _ tp) = tp
+  typeOf (LitPat _ tp) = tp
+  typeOf (SigPat _ tp) = tp
+
+instance TypeOf GenExp where
+  typeOf (VarGenExp _ t) = t
+  typeOf (BoundVarGenExp _ t) = t
+  typeOf (FileGenExp _ _ t) = t
+  typeOf (RangeGenExp _ _ _ t) = t
+
+instance TypeOf ExpCase where
+  typeOf (ExpCase _ e _ _) = typeOf e
+
+instance TypeOf ModelCase where
+  typeOf (ModelCase p _ _) = typeOf p

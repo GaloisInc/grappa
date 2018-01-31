@@ -408,7 +408,7 @@ instance Resolvable StmtCase where
     (withBoundVars (patternVars patt) $ resolve body)
     (return ())
 
-instance Resolvable RawPattern where
+instance Resolvable Pattern where
   resolve (VarPat x ()) = return $ VarPat x ()
   resolve (WildPat ()) = return $ WildPat ()
   resolve (CtorPat nm patts ()) =
@@ -423,26 +423,14 @@ instance Resolvable FunCase where
     liftM2 FunCase (mapM resolve patts)
     (withBoundVars (Set.unions $ map patternVars patts) $ resolve body)
 
-instance Resolvable ModelSubCase where
-  resolve (ModelSubCase patt maybe_exp stmt) =
+instance Resolvable ModelCase where
+  resolve (ModelCase patt e stmt) =
     let vars = patternVars patt in
-    liftM3 ModelSubCase (resolve patt)
-    (withBoundVars vars $
-     case maybe_exp of
-       Just e  -> Just <$> resolve e
-       Nothing -> return Nothing)
+    liftM3 ModelCase (resolve patt)
+    (withBoundVars vars $ resolve e)
     (withBoundVars vars $ resolve stmt)
 
-instance Resolvable ModelCase where
-  resolve (ModelCase patts sub_cases) =
-    liftM2 ModelCase (mapM resolve patts)
-    (withBoundVars (Set.unions $ map patternVars patts) $
-     mapM resolve sub_cases)
-
 instance Resolvable Decl where
-  resolve (ModelDecl nm annot cases) =
-    withBoundVars (Set.singleton nm) $
-    liftM2 (ModelDecl nm) (resolveDeclTypeAnnot annot) (mapM resolve cases)
   resolve (FunDecl nm annot cases) =
     withBoundVars (Set.singleton nm) $
     liftM2 (FunDecl nm) (resolveDeclTypeAnnot annot) (mapM resolve cases)

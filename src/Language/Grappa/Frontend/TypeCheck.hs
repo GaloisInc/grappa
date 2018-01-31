@@ -38,8 +38,8 @@ data TypeErrorContext = ErrorCtxExp (Exp PreTyped) (Maybe Type)
                       | ErrorCtxGenExp (GenExp PreTyped) (Maybe Type)
                       | ErrorCtxStmt (Stmt PreTyped) (Maybe ())
                       | ErrorCtxGPStmt (GPriorStmt PreTyped) (Maybe ())
-                      | ErrorCtxPattern (RawPattern PreTyped) (Maybe Type)
-                      | ErrorCtxVPattern (RawPattern PreTyped) (Maybe Type)
+                      | ErrorCtxPattern (Pattern PreTyped) (Maybe Type)
+                      | ErrorCtxVPattern (Pattern PreTyped) (Maybe Type)
                       | ErrorCtxDecl (Decl PreTyped) (Maybe ())
                       | ErrorCtxUnify Type Type
                       deriving Show
@@ -62,7 +62,7 @@ instance HasErrorContext (Stmt PreTyped) () where
   mkErrorContext = ErrorCtxStmt
 instance HasErrorContext (GPriorStmt PreTyped) () where
   mkErrorContext = ErrorCtxGPStmt
-instance HasErrorContext (RawPattern PreTyped) Type where
+instance HasErrorContext (Pattern PreTyped) Type where
   mkErrorContext = ErrorCtxPattern
 instance HasErrorContext (Decl PreTyped) () where
   mkErrorContext = ErrorCtxDecl
@@ -210,67 +210,51 @@ lookupVarType var =
      return (Map.lookup var $ tc_ctx env,
              Set.member var $ tc_unsampled_vars env)
 
--- | Save and restore the variable context as well as the variables not yet
--- marked as sampled during a computation
+-- | Save and restore the variable context for type-checking
 withLocalVarCtx :: TypeCheck a -> TypeCheck a
 withLocalVarCtx m =
   do save_env <- get
      a <- m
-     modify $ \env -> env { tc_ctx = tc_ctx save_env,
-                            tc_unsampled_vars = tc_unsampled_vars save_env }
+     modify $ \env -> env { tc_ctx = tc_ctx save_env }
      return a
 
--- | Add a (term, not type) variable to the typing context, also setting whether
--- it is an "unsampled" variable
-addVarToContext :: Bool -> Ident -> Type -> TypeCheck ()
-addVarToContext is_unsampled_var var tp =
+-- | Add a (term, not type) variable to the typing context
+addVarToContext :: Ident -> Type -> TypeCheck ()
+addVarToContext var tp =
   modify $ \env ->
-  env { tc_ctx = Map.insert var  tp (tc_ctx env),
-        tc_unsampled_vars =
-          (if is_unsampled_var then Set.insert else Set.delete) var $
-          tc_unsampled_vars env }
+  env { tc_ctx = Map.insert var tp (tc_ctx env) }
 
 -- | Typing contexts for local variables
 type VarCtx = [(Ident, Type)]
 
+-- | Mark a list of variables as sampled
+markSampledVars :: VarCtx -> TypeCheck ()
+markSampledVars ctx =
+  modify $ \env ->
+  env { tc_unsampled_vars =
+          foldr (Set.delete . fst) (tc_unsampled_vars env) ctx }
+
 -- | Locally add a set of (term, not type) variables to the typing context for
--- the duration of a given 'TypeCheck' computation, also setting them as
--- "unsampled", if @is_unsampled_ctx@ is 'True', or "sampled" otherwise
-withVarCtx :: Bool -> VarCtx -> TypeCheck a -> TypeCheck a
-withVarCtx is_unsampled_ctx ctx m =
-  withLocalVarCtx (mapM (\(var,tp) ->
-                          addVarToContext is_unsampled_ctx var tp) ctx >> m)
+-- the duration of a given 'TypeCheck' computation
+withVarCtx :: VarCtx -> TypeCheck a -> TypeCheck a
+withVarCtx ctx m =
+  withLocalVarCtx (mapM (\(var,tp) -> addVarToContext var tp) ctx >> m)
 
-withModelCtx :: TypeCheck a -> TypeCheck a
-withModelCtx m = do
-  save_env <- get
-  modify $ \env -> env { tc_unsampled_vars = Set.empty }
-  a <- m
-  modify $ \env -> env { tc_ctx = tc_ctx save_env
-                       , tc_unsampled_vars = tc_unsampled_vars save_env
-                       }
-  return a
+-- | Save and restore the set of unsampled variables
+withLocalUnsampledVars :: TypeCheck a -> TypeCheck a
+withLocalUnsampledVars m =
+  do save_env <- get
+     a <- m
+     modify $ \env -> env { tc_unsampled_vars = tc_unsampled_vars save_env }
+     return a
 
--- FIXME: this is no longer needed...
--- | Get the 'Support' type of a distribution type
-{-
-distSupportType :: Type -> TypeCheck Type
-distSupportType dist_tp =
-  do
-    -- First, get all the free type vars of dist_tp
-    let tvars = Set.toList $ freeVars dist_tp
-    -- Next, emit dist_tp to TH, also mapping the free vars of dist_tp to TH
-    (tvars_th, dist_tp_th) <-
-      embedM $
-      do tvars_th <- mapM emitNewTVar tvars
-         dist_tp_th <- emitType dist_tp
-         return (tvars_th, dist_tp_th)
-    -- Then ingest Support applied to dist_tp back from TH
-    embedM $ do
-      forM_ (zip tvars tvars_th) $ \(tvar, tvar_th) ->
-        setTHVarRole tvar_th $ RoleTVar tvar
-      ingestType $ applyTHType (TH.ConT ''Support) [dist_tp_th]
--}
+-- | Locally add a set of (term, not type) variables to the typing context, also
+-- seting them as the set of unsampled variables
+withUnsampledVarCtx :: VarCtx -> TypeCheck a -> TypeCheck a
+withUnsampledVarCtx ctx m =
+  withLocalUnsampledVars $
+  (modify (\env -> env { tc_unsampled_vars = Set.fromList (map fst ctx) }) >>
+   withVarCtx ctx m)
 
 
 --
@@ -519,8 +503,6 @@ instance Zonkable a => Zonkable [a] where
   zonk' l = mapM zonk' l
 
 instance Zonkable (Decl Typed) where
-  zonk' (ModelDecl f annot cases) =
-    ModelDecl f annot <$> zonk' cases
   zonk' (FunDecl f annot cases) =
     FunDecl f annot <$> zonk' cases
   zonk' (SourceDecl f t e) =
@@ -533,18 +515,14 @@ instance Zonkable (InfMethod Typed) where
     InfMethod n <$> mapM zonk' ps
 
 instance Zonkable (ModelCase Typed) where
-  zonk' (ModelCase patts sub_cases) =
-    liftM2 ModelCase (zonk' patts) (zonk' sub_cases)
-
-instance Zonkable (ModelSubCase Typed) where
-  zonk' (ModelSubCase patt maybe_exp body) =
-    liftM3 ModelSubCase (zonk' patt) (zonk' maybe_exp) (zonk' body)
+  zonk' (ModelCase patt maybe_exp body) =
+    liftM3 ModelCase (zonk' patt) (zonk' maybe_exp) (zonk' body)
 
 instance Zonkable (FunCase Typed) where
   zonk' (FunCase patts exps) =
     liftM2 FunCase (zonk' patts) (zonk' exps)
 
-instance Zonkable (RawPattern Typed) where
+instance Zonkable (Pattern Typed) where
   zonk' (VarPat var tp) = VarPat var <$> zonk' tp
   zonk' (WildPat tp) = WildPat <$> zonk' tp
   zonk' (CtorPat ctor patts tp) =
@@ -824,7 +802,7 @@ instance TypeCheckable Type Exp where
   typeCheck' (ListExp enabled _) _ = notEnabled enabled
   typeCheck' (LetExp n _ lhs rhs _) tp =
     do (lhs_t, n_tp) <- typeInfer lhs
-       rhs_t <- withVarCtx False [(n,n_tp)] $ typeCheck rhs tp
+       rhs_t <- withVarCtx [(n,n_tp)] $ typeCheck rhs tp
        return (LetExp n n_tp lhs_t rhs_t tp)
   typeCheck' (CaseExp scrut cases _) tp =
     do (scrut_t, match_type) <- typeInfer scrut
@@ -832,8 +810,10 @@ instance TypeCheckable Type Exp where
        ensureADTInterpConstr match_type
        return $ CaseExp scrut_t cases_t tp
   typeCheck' (ModelExp cs _) tp = do
-    cs' <- withModelCtx $ mapM (flip typeCheck' tp) cs
-    return (ModelExp cs' tp)
+    vtp <- exposeDistType tp
+    cs' <- mapM (flip typeCheck' vtp) cs
+    ensureModelExpConstraints cs'
+    return (ModelExp cs' (DistType vtp))
   typeCheck' (IfExp c t e _) tp = do
     c_t <- typeCheck c boolType
     t_t <- typeCheck t tp
@@ -843,7 +823,7 @@ instance TypeCheckable Type Exp where
   typeCheck' (FunExp (FunCase pats e) _) tp = do
     (args_tp, ret_tp) <- exposeArrowType (length pats) tp
     (pats_t, var_ctxs) <- unzip <$> zipWithM typeCheckPatt pats args_tp
-    e_t <- withVarCtx False (concat var_ctxs) $ typeCheck e ret_tp
+    e_t <- withVarCtx (concat var_ctxs) $ typeCheck e ret_tp
     return (FunExp (FunCase pats_t e_t) tp)
 
   typeInfer' (NameExp n _) =
@@ -868,7 +848,7 @@ instance TypeCheckable Type Exp where
   typeInfer' (ListExp enabled _) = notEnabled enabled
   typeInfer' (LetExp n _ lhs rhs _) =
     do (lhs_t, n_tp) <- typeInfer lhs
-       (rhs_t, tp) <- withVarCtx False [(n,n_tp)] $ typeInfer rhs
+       (rhs_t, tp) <- withVarCtx [(n,n_tp)] $ typeInfer rhs
        return (LetExp n n_tp lhs_t rhs_t tp, tp)
   typeInfer' (CaseExp scrut cases _) =
     do (scrut_t, match_type) <- typeInfer scrut
@@ -876,9 +856,9 @@ instance TypeCheckable Type Exp where
        cases_t <- mapM (\c -> typeCheck' c (match_type, ret_tp)) cases
        return (CaseExp scrut_t cases_t ret_tp, ret_tp)
   typeInfer' (ModelExp (c:cs) _) = do
-    (fst_subcase_t, vtp) <- withModelCtx $ typeInfer' c
-    subcases_t <- withModelCtx $ mapM (flip typeCheck' vtp) cs
-    addSubCaseMixtureDists (fst_subcase_t : subcases_t)
+    (fst_subcase_t, vtp) <- typeInfer' c
+    subcases_t <- mapM (flip typeCheck' vtp) cs
+    ensureModelExpConstraints (fst_subcase_t : subcases_t)
     return (ModelExp (fst_subcase_t : subcases_t) (DistType vtp), (DistType vtp))
   typeInfer' (ModelExp [] _) =
     error "Empty list of sub-cases!"
@@ -891,7 +871,7 @@ instance TypeCheckable Type Exp where
   typeInfer' (FunExp (FunCase pats e) _) = do
     patsInf <- mapM typeInferPatt pats
     let (pats_t, pat_typs, var_ctxs) = unzip3 patsInf
-    (e_t, e_typ) <- withVarCtx False (concat var_ctxs) $ typeInfer e
+    (e_t, e_typ) <- withVarCtx (concat var_ctxs) $ typeInfer e
     let tp = foldr ArrowType e_typ pat_typs
     return (FunExp (FunCase pats_t e_t) tp, tp)
 
@@ -913,17 +893,21 @@ instance TypeCheckable () Stmt where
       -- variables bound by it (some of which may shadow existing variables, in
       -- which case they move from "unsampled" to "sampled")
       (vexp_t, vctx) <- typeCheckVExp vexp vtp
+      -- Mark the lhs variables as sampled
+      markSampledVars vctx
       -- Finally, check the body relative to vctx
-      body_exp_t <- withVarCtx False vctx $ typeCheck body_exp ()
+      body_exp_t <- withVarCtx vctx $ typeCheck body_exp ()
       return $ SampleStmt vexp_t dist_exp_t body_exp_t
   typeCheck' (LetStmt var rhs_exp body_exp) () =
     do
       (rhs_exp_t, var_type) <- typeInfer rhs_exp
-      body_exp_t <- withVarCtx False [(var,var_type)] $ typeCheck body_exp ()
+      body_exp_t <- withVarCtx [(var,var_type)] $ typeCheck body_exp ()
       return $ LetStmt var rhs_exp_t body_exp_t
   typeCheck' (CaseStmt scrut cases) () =
     do (scrut_t, match_type) <- typeInfer scrut
        cases_t <- mapM (\c -> typeCheck' c match_type) cases
+       void (error ("FIXME HERE: in type-checking case statements, "
+                    ++ "should reset the sampled vars in each branch"))
        return $ CaseStmt scrut_t cases_t
 
   typeInfer' stmt =
@@ -990,7 +974,7 @@ instance TypeCheckable Type SourceExp where
   typeCheck' (ListCompSrcExp expr arms ()) tp = do
     elem_tp <- exposeListType tp
     arms_t <- mapM typeInferArm arms
-    expr_t <- withVarCtx False (concat (map snd arms_t))
+    expr_t <- withVarCtx (concat (map snd arms_t))
                 $ typeCheck expr elem_tp
     return (ListCompSrcExp expr_t (map fst arms_t) tp)
 
@@ -1029,18 +1013,14 @@ typeInferArm (ListCompArm pat expr) = do
 instance TypeCheckable (Type, Type) ExpCase where
   typeCheck' (ExpCase patt body _ _) (patt_tp, body_tp) =
     do (patt_t, var_ctx) <- typeCheckPatt patt patt_tp
-       body_t <- withVarCtx False var_ctx $ typeCheck body body_tp
-       case patt_tp of
-         ADTType {} -> ensureADTInterpConstr patt_tp
-         _          -> return ()
+       body_t <- withVarCtx var_ctx $ typeCheck body body_tp
+       ensurePatternConstraints patt_t
        return $ ExpCase patt_t body_t patt_tp body_tp
 
   typeInfer' (ExpCase patt body _ _) =
     do (patt_t, patt_tp, var_ctx) <- typeInferPatt patt
-       (body_t, body_tp) <- withVarCtx False var_ctx $ typeInfer body
-       case patt_tp of
-         ADTType {} -> ensureADTInterpConstr patt_tp
-         _          -> return ()
+       (body_t, body_tp) <- withVarCtx var_ctx $ typeInfer body
+       ensurePatternConstraints patt_t
        return (ExpCase patt_t body_t patt_tp body_tp, (patt_tp, body_tp))
 
 -- Type checking and inference for cases of case statements, which are
@@ -1049,19 +1029,21 @@ instance TypeCheckable (Type, Type) ExpCase where
 instance TypeCheckable Type StmtCase where
   typeCheck' (StmtCase patt body _) patt_tp =
     do (patt_t, var_ctx) <- typeCheckPatt patt patt_tp
-       body_t <- withVarCtx False var_ctx $ typeCheck body ()
+       body_t <- withVarCtx var_ctx $ typeCheck body ()
+       ensurePatternConstraints patt_t
        return $ StmtCase patt_t body_t patt_tp
 
   typeInfer' (StmtCase patt body _) =
     do (patt_t, patt_tp, var_ctx) <- typeInferPatt patt
-       body_t <- withVarCtx False var_ctx $ typeCheck body ()
+       body_t <- withVarCtx var_ctx $ typeCheck body ()
+       ensurePatternConstraints patt_t
        return (StmtCase patt_t body_t patt_tp, patt_tp)
 
 
--- Type checking and inference for ModelSubCases, which are type-checked against
+-- Type checking and inference for ModelCases, which are type-checked against
 -- a single type for the pattern
-instance TypeCheckable Type ModelSubCase where
-  typeCheck' (ModelSubCase vpatt maybe_exp body) vpatt_tp =
+instance TypeCheckable Type ModelCase where
+  typeCheck' (ModelCase vpatt prob_exp body) vpatt_tp =
     do
       -- First, type-check the variable pattern; note that var_ctx binds
       -- distribution variables which are unsampled, so withVarCtx should be
@@ -1069,10 +1051,11 @@ instance TypeCheckable Type ModelSubCase where
       (vpatt_t, var_ctx) <- typeCheckPatt vpatt vpatt_tp
       -- Now type-check the other components relative to var_ctx; note that the
       -- prpobability expression cannot depend on the free variables of vpatt
-      liftM2 (ModelSubCase vpatt_t) (typeCheckMaybe maybe_exp probType)
-        (withVarCtx True var_ctx $ typeCheck body ())
+      liftM2 (ModelCase vpatt_t) (typeCheck prob_exp probType)
+        (withUnsampledVarCtx var_ctx $ typeCheck body ())
 
-  typeInfer' (ModelSubCase vpatt maybe_exp body) =
+  typeInfer' (ModelCase vpatt prob_exp body) =
+    withLocalUnsampledVars $
     do
       -- First, infer the type of the variable pattern; note that var_ctx binds
       -- distribution variables which are unsampled, so withVarCtx should be
@@ -1080,113 +1063,57 @@ instance TypeCheckable Type ModelSubCase where
       (vpatt_t, vpatt_tp, var_ctx) <- typeInferPatt vpatt
       -- Now type-check the other components relative to var_ctx; note that the
       -- prpobability expression cannot depend on the free variables of vpatt
-      maybe_exp_t <- typeCheckMaybe maybe_exp probType
-      body_t <- withVarCtx True var_ctx $ typeCheck body ()
-      return (ModelSubCase vpatt_t maybe_exp_t body_t, vpatt_tp)
-
--- If we're pattern-matching over a single alternative, then we should
--- add the Interp__ctorDist-style constraints to the constructors
--- we're pattern-matching over
-addCtorConstraints :: Pattern Typed -> TypeCheck ()
-addCtorConstraints (VarPat {}) = return ()
-addCtorConstraints (WildPat {}) = return ()
-addCtorConstraints (CtorPat ctor ps _) = do
-  mapM_ addCtorConstraints ps
-  let ctor_top_type = ctor_type ctor
-  (_, ret_type) <- instantiateTopType ctor_top_type
-  let adtName = case ret_type of
-        ADTType info _ -> TH.nameBase (tn_th_name info)
-        _ -> error "Constructor return type should name an ADT"
-      constrName = TH.mkName ("Interp__ctorDist__" ++ adtName)
-  ensureNamedInterpConstr constrName []
-addCtorConstraints (TuplePat ps _) = mapM_ addCtorConstraints ps
-addCtorConstraints (LitPat _ _) = return ()
-addCtorConstraints (SigPat p _) = addCtorConstraints p
-
--- If we're pattern-matching over MULTIPLE alternatives, then we
--- should add the Interp__adtDist-style constraints to the
--- constructors we're pattern-matching over, and a Rational constraint
--- just for good measure
-addMixtureConstraints :: Pattern Typed -> TypeCheck ()
-addMixtureConstraints (VarPat {}) = return ()
-addMixtureConstraints (WildPat {}) = return ()
-addMixtureConstraints (CtorPat ctor ps _) = do
-  mapM_ addMixtureConstraints ps
-  let ctor_top_type = ctor_type ctor
-  (_, ret_type) <- instantiateTopType ctor_top_type
-  let adtName = case ret_type of
-        ADTType info _ -> TH.nameBase (tn_th_name info)
-        _ -> error "Constructor return type should name an ADT"
-      constrName = TH.mkName ("Interp__adtDist__" ++ adtName)
-  ensureNamedInterpConstr constrName []
-  -- because ADTs usually use probabilities, we also need to include
-  -- an Interp__rational constraint over probabilities
-  ensureNamedInterpConstr ''Interp__'rational [BaseType probTypeNameInfo []]
-addMixtureConstraints (TuplePat ps _) = mapM_ addMixtureConstraints ps
-addMixtureConstraints (LitPat _ _) = return ()
-addMixtureConstraints (SigPat p _) = addMixtureConstraints p
+      maybe_exp_t <- typeCheck prob_exp probType
+      body_t <- withUnsampledVarCtx var_ctx $ typeCheck body ()
+      return (ModelCase vpatt_t maybe_exp_t body_t, vpatt_tp)
 
 
--- | Add to the currenct distribution set any distributions needed to form a
--- mixture model of the given sub-cases
-addSubCaseMixtureDists :: [ModelSubCase Typed] -> TypeCheck ()
-addSubCaseMixtureDists [ModelSubCase p _ _] =
-  -- A single sub-case does not need to be mixed, so has no requirements!
-  addCtorConstraints p
-addSubCaseMixtureDists cs =
-  -- Otherwise, we add the Categorical distribution
-  mapM_ addMixtureConstraints [ p | ModelSubCase p _ _ <- cs ]
-
-introduceADTConstraints :: Pattern Typed -> TypeCheck ()
-introduceADTConstraints (CtorPat _ ps t) = do
+-- | Ensure all the constraints needed to use a pattern in a case expression
+ensurePatternConstraints :: Pattern Typed -> TypeCheck ()
+ensurePatternConstraints (VarPat {}) = return ()
+ensurePatternConstraints (WildPat {}) = return ()
+ensurePatternConstraints (CtorPat _ ps t) = do
   ensureADTInterpConstr t
-  mapM_ introduceADTConstraints ps
-introduceADTConstraints (TuplePat ps _) =
-  mapM_ introduceADTConstraints ps
-introduceADTConstraints (SigPat p _) =
-  introduceADTConstraints p
-introduceADTConstraints _ = return ()
+  mapM_ ensurePatternConstraints ps
+ensurePatternConstraints (TuplePat ps _) =
+  mapM_ ensurePatternConstraints ps
+ensurePatternConstraints (LitPat (IntegerLit _) tp) =
+  ensureNamedInterpConstr ''Interp__'integer [tp] >>
+  ensureNamedInterpConstr ''Interp__'eq'eq [tp] >>
+  ensureNamedInterpConstr ''Interp__'ifThenElse []
+ensurePatternConstraints (LitPat (RationalLit _) tp) =
+  ensureNamedInterpConstr ''Interp__'rational [tp] >>
+  ensureNamedInterpConstr ''Interp__'eq'eq [tp] >>
+  ensureNamedInterpConstr ''Interp__'ifThenElse []
+ensurePatternConstraints (SigPat p _) =
+  ensurePatternConstraints p
 
--- Type checking and inference for ModelCases, which are type-checked against a
--- list of types for the normal arguments and a single type for the distribution
--- variable
-instance TypeCheckable ([Type], Type) ModelCase where
-  typeCheck' (ModelCase arg_patts sub_cases) (arg_tps, vtp)
-    | length arg_tps == length arg_patts
-    = do (arg_patts_t, var_ctxs) <-
-           unzip <$> zipWithM typeCheckPatt arg_patts arg_tps
-         sub_cases_t <-
-           withVarCtx False (concat var_ctxs) $
-           mapM (\sc -> typeCheck' sc vtp) sub_cases
-         addSubCaseMixtureDists sub_cases_t
+-- | Ensure all the constraints needed to use a pattern in a model expression
+ensureVPatternConstraints :: Pattern Typed -> TypeCheck ()
+ensureVPatternConstraints (VarPat {}) = return ()
+ensureVPatternConstraints (WildPat {}) = return ()
+ensureVPatternConstraints (CtorPat _ ps tp) =
+  do mapM_ ensureVPatternConstraints ps
+     ensureADTInterpConstr tp
+ensureVPatternConstraints (TuplePat ps _) = mapM_ ensureVPatternConstraints ps
+ensureVPatternConstraints (LitPat (IntegerLit _) tp) =
+  ensureNamedInterpConstr ''Interp__'integer [tp] >>
+  ensureNamedInterpConstr ''Interp__'ifThenElseStmt []
+ensureVPatternConstraints (LitPat (RationalLit _) tp) =
+  ensureNamedInterpConstr ''Interp__'rational [tp] >>
+  ensureNamedInterpConstr ''Interp__'ifThenElseStmt []
+ensureVPatternConstraints (SigPat p _) = ensureVPatternConstraints p
 
-         mapM_ introduceADTConstraints arg_patts_t
-         return $ ModelCase arg_patts_t sub_cases_t
-  typeCheck' _ _ = throwError ErrorCaseArity
-
-  typeInfer' (ModelCase arg_patts (fst_sub_case : sub_cases)) =
-    do
-      -- First, infer the types of the argument patterns
-      (arg_patts_t, arg_tps, var_ctxs) <-
-        unzip3 <$> mapM typeInferPatt arg_patts
-      let var_ctx = concat var_ctxs
-      -- Next, infer the type of the first sub-case
-      (fst_sub_case_t, vtp) <-
-        withVarCtx False var_ctx $ typeInfer' fst_sub_case
-      -- Now type-check the remaining sub-cases
-      sub_cases_t <-
-        withVarCtx False var_ctx $ mapM (flip typeCheck' vtp) sub_cases
-      -- Don't forget to add any distributions needed by the mixture model
-      -- generated from the sub-cases
-      addSubCaseMixtureDists (fst_sub_case_t : sub_cases_t)
-      mapM_ introduceADTConstraints arg_patts_t
-      -- Finally, return the results
-      return (ModelCase arg_patts_t (fst_sub_case_t : sub_cases_t),
-              (arg_tps, vtp))
-  typeInfer' (ModelCase _ []) =
-    -- Note: we use an error instead of an exception because the parser should
-    -- never yield an empty list of sub-cases...
-    error "Empty list of sub-cases!"
+-- | Ensure the type constraints needed to form a model expression over the
+-- given set of 'ModelCase's
+ensureModelExpConstraints :: [ModelCase Typed] -> TypeCheck ()
+ensureModelExpConstraints cases =
+  -- First, ensure the constraints for the v-patterns in all the cases
+  mapM (\(ModelCase patt _ _) -> ensureVPatternConstraints patt) cases >>
+  -- For more than one case, we also need the Interp__'vmatch constraint
+  if length cases > 1 then
+    ensureNamedInterpConstr ''Interp__'vmatch []
+  else return ()
 
 
 -- Type checking and inference for FunCases, which are type-checked against a
@@ -1196,8 +1123,8 @@ instance TypeCheckable ([Type], Type) FunCase where
     | length arg_tps == length arg_patts
     = do (arg_patts_t, var_ctxs) <-
            unzip <$> zipWithM typeCheckPatt arg_patts arg_tps
-         body_t <- withVarCtx False (concat var_ctxs) $ typeCheck body ret_tp
-         mapM_ introduceADTConstraints arg_patts_t
+         body_t <- withVarCtx (concat var_ctxs) $ typeCheck body ret_tp
+         mapM_ ensurePatternConstraints arg_patts_t
          return (FunCase arg_patts_t body_t)
   typeCheck' _ _ =
     throwError ErrorCaseArity
@@ -1205,8 +1132,8 @@ instance TypeCheckable ([Type], Type) FunCase where
   typeInfer' (FunCase arg_patts body) =
     do (arg_patts_t, arg_tps, var_ctxs) <-
          unzip3 <$> mapM typeInferPatt arg_patts
-       (body_t, ret_tp) <- withVarCtx False (concat var_ctxs) $ typeInfer body
-       mapM_ introduceADTConstraints arg_patts_t
+       (body_t, ret_tp) <- withVarCtx (concat var_ctxs) $ typeInfer body
+       mapM_ ensurePatternConstraints arg_patts_t
        return (FunCase arg_patts_t body_t, (arg_tps, ret_tp))
 
 
@@ -1408,35 +1335,13 @@ instance TypeCheckable () Decl where
     do decl_t <- typeCheck' decl ()
        return (decl_t, ())
 
-  typeCheck' d@(ModelDecl nm (Just top_tp) cases) () =
-    do clearTCEnv
-       (arg_tps, dist_tp) <- instantiateTopType top_tp
-       let tvset = freeVars (arg_tps, dist_tp)
-       tp <- case dist_tp of
-         DistType tp -> return tp
-         _ -> throwError $ ErrorBadDeclTypeAnnot d
-       cases_t <-
-         -- FIXME: use the top-level type for nm here in recursive calls
-         withVarCtx False [(nm, mkArrowType arg_tps dist_tp)] $
-         forM cases $ \c -> typeCheck' c (arg_tps, tp)
-       ensureTVarsGeneral top_tp (mkArrowType arg_tps (DistType tp)) tvset
-       zonk $ ModelDecl nm top_tp cases_t
-  typeCheck' (ModelDecl nm Nothing cases) () =
-    do clearTCEnv
-       arg_tps <- replicateM (modelCaseArity $ head cases) freshType
-       tp <- freshType
-       cases_t <-
-         withVarCtx False [(nm, mkArrowType arg_tps (DistType tp))] $
-         forM cases $ \c -> typeCheck' c (arg_tps, tp)
-       top_tp <- buildTopType arg_tps (DistType tp)
-       zonk $ ModelDecl nm top_tp cases_t
   typeCheck' (FunDecl nm (Just top_tp) cases) () =
     do clearTCEnv
        (arg_tps, ret_tp) <- instantiateTopType top_tp
        let tvset = freeVars (arg_tps, ret_tp)
        cases_t <-
          -- FIXME: use the top-level type for nm here in recursive calls
-         withVarCtx False [(nm, mkArrowType arg_tps ret_tp)] $
+         withVarCtx [(nm, mkArrowType arg_tps ret_tp)] $
          forM cases $ \c -> typeCheck' c (arg_tps, ret_tp)
        ensureTVarsGeneral top_tp (mkArrowType arg_tps ret_tp) tvset
        zonk $ FunDecl nm top_tp cases_t
@@ -1445,7 +1350,7 @@ instance TypeCheckable () Decl where
        arg_tps <- replicateM (funCaseArity $ head cases) freshType
        ret_tp <- freshType
        cases_t <-
-         withVarCtx False [(nm, mkArrowType arg_tps ret_tp)] $
+         withVarCtx [(nm, mkArrowType arg_tps ret_tp)] $
          forM cases $ \c -> typeCheck' c (arg_tps, ret_tp)
        top_tp <- buildTopType arg_tps ret_tp
        zonk $ FunDecl nm top_tp cases_t
@@ -1462,41 +1367,3 @@ instance TypeCheckable () Decl where
       where grappaType PTString = error "Grappa doesn't understand strings yet!"
             grappaType PTInt    = intType
             grappaType PTFloat  = doubleType
-
-class TypeOf t where
-  getTypeOf :: t Rewritten -> Type
-
-instance TypeOf Exp where
-  getTypeOf (NameExp _ t) = t
-  getTypeOf (LiteralExp _ t) = t
-  getTypeOf (SigExp _ t) = t
-  getTypeOf (AppExp _ _ t) = t
-  getTypeOf (TupleExp _ t) = t
-  getTypeOf (CaseExp _ _ t) = t
-  getTypeOf (LetExp _ _ _ _ t) = t
-  getTypeOf (ParensExp _ e) = getTypeOf e
-  getTypeOf (ModelExp _ t) = t
-  getTypeOf x = error ("Language.Grappa.Frontend.TypeCheck.getTypeOf: " ++ show x)
-
-instance TypeOf CompiledPattern where
-  getTypeOf (CompiledTuplePat _ t) = t
-  getTypeOf (CompiledCtorPat _ _ t) = t
-  getTypeOf (CompiledLitPat _ t) = t
-  getTypeOf (CompiledBasicPattern (VarCPat _ t)) = t
-  getTypeOf (CompiledBasicPattern (WildCPat t)) = t
-
-instance TypeOf CompiledVarPattern where
-  getTypeOf (VarCPat _ t) = t
-  getTypeOf (WildCPat t) = t
-
-instance TypeOf GenExp where
-  getTypeOf (VarGenExp _ t) = t
-  getTypeOf (BoundVarGenExp _ t) = t
-  getTypeOf (FileGenExp _ _ t) = t
-  getTypeOf (RangeGenExp _ _ _ t) = t
-
-instance TypeOf ExpCase where
-  getTypeOf (ExpCase _ e _ _) = getTypeOf e
-
-instance TypeOf ModelSubCase where
-  getTypeOf (ModelSubCase p _ _) = getTypeOf p

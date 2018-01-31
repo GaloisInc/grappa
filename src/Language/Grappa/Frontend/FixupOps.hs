@@ -161,7 +161,7 @@ instance FixupOps GPriorStmt where
   fixupOps (GPriorStmt vexp rhs) =
     GPriorStmt (fixupOps vexp) (fixupOps rhs)
 
-instance FixupOps RawPattern where
+instance FixupOps Pattern where
   fixupOps (VarPat var ()) = VarPat var ()
   fixupOps (WildPat ()) = WildPat ()
   fixupOps (CtorPat ctor patts ()) =
@@ -170,20 +170,14 @@ instance FixupOps RawPattern where
   fixupOps (LitPat lit ()) = LitPat lit ()
   fixupOps (SigPat patt tp) = SigPat (fixupOps patt) tp
 
-instance FixupOps ModelSubCase where
-  fixupOps (ModelSubCase patt maybe_exp body) =
-    ModelSubCase (fixupOps patt) (fmap fixupOps maybe_exp) (fixupOps body)
-
 instance FixupOps ModelCase where
-  fixupOps (ModelCase patts sub_cases) =
-    ModelCase (map fixupOps patts) (map fixupOps sub_cases)
+  fixupOps (ModelCase patt exp body) =
+    ModelCase (fixupOps patt) (fixupOps exp) (fixupOps body)
 
 instance FixupOps FunCase where
   fixupOps (FunCase patts body) = FunCase (map fixupOps patts) (fixupOps body)
 
 instance FixupOps Decl where
-  fixupOps (ModelDecl nm annot cases) =
-    ModelDecl nm annot (map fixupOps cases)
   fixupOps (FunDecl nm annot cases) =
     FunDecl nm annot (map fixupOps cases)
   fixupOps (SourceDecl name tp sexp) =

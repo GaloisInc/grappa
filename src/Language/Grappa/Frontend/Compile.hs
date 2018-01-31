@@ -7,6 +7,7 @@
 module Language.Grappa.Frontend.Compile where
 
 import System.IO
+import Data.Proxy
 import qualified Data.Text as T
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Quote as TH
@@ -28,7 +29,6 @@ import Language.Grappa.Frontend.Parser (parseDecls, parseGPrior, Parse, ParseErr
 import Language.Grappa.Frontend.IngestEmitType
 import Language.Grappa.Frontend.Resolve
 import Language.Grappa.Frontend.FixupOps
-import Language.Grappa.Frontend.Matching
 import Language.Grappa.Frontend.TypeCheck
 import Language.Grappa.Frontend.DataSource
 import Language.Grappa.Frontend.Errors()
@@ -40,15 +40,15 @@ import Language.Grappa.GrappaInternals
 -- Monad for the Whole Grappa Compiler
 --
 
-data CompileContext = CompileCtxExp (Exp Rewritten)
-                    | CompileCtxVExp (VExp Rewritten)
-                    | CompileCtxPrExp (SourceExp Rewritten)
-                    | CompileGenExp (GenExp Rewritten)
-                    | CompileListCompArm (ListCompArm Rewritten)
-                    | CompileCtxStmt (Stmt Rewritten)
-                    | CompileCtxGPStmt (GPriorStmt Rewritten)
-                    | CompileCtxPattern (CompiledPattern Rewritten)
-                    | CompileCtxDecl (Decl Rewritten)
+data CompileContext = CompileCtxExp (Exp Typed)
+                    | CompileCtxVExp (VExp Typed)
+                    | CompileCtxPrExp (SourceExp Typed)
+                    | CompileGenExp (GenExp Typed)
+                    | CompileListCompArm (ListCompArm Typed)
+                    | CompileCtxStmt (Stmt Typed)
+                    | CompileCtxGPStmt (GPriorStmt Typed)
+                    | CompileCtxPattern (Pattern Typed)
+                    | CompileCtxDecl (Decl Typed)
                     | CompileCtxType Type
                     | CompileCtxTopType TopType
                     deriving Show
@@ -85,23 +85,23 @@ instance HasCompileContext Type where
   mkCompileContext = CompileCtxType
 instance HasCompileContext TopType where
   mkCompileContext = CompileCtxTopType
-instance HasCompileContext (Exp Rewritten) where
+instance HasCompileContext (Exp Typed) where
   mkCompileContext = CompileCtxExp
-instance HasCompileContext (VExp Rewritten) where
+instance HasCompileContext (VExp Typed) where
   mkCompileContext = CompileCtxVExp
-instance HasCompileContext (SourceExp Rewritten) where
+instance HasCompileContext (SourceExp Typed) where
   mkCompileContext = CompileCtxPrExp
-instance HasCompileContext (GenExp Rewritten) where
+instance HasCompileContext (GenExp Typed) where
   mkCompileContext = CompileGenExp
-instance HasCompileContext (ListCompArm Rewritten) where
+instance HasCompileContext (ListCompArm Typed) where
   mkCompileContext = CompileListCompArm
-instance HasCompileContext (Stmt Rewritten) where
+instance HasCompileContext (Stmt Typed) where
   mkCompileContext = CompileCtxStmt
-instance HasCompileContext (GPriorStmt Rewritten) where
+instance HasCompileContext (GPriorStmt Typed) where
   mkCompileContext = CompileCtxGPStmt
-instance HasCompileContext (CompiledPattern Rewritten) where
+instance HasCompileContext (Pattern Typed) where
   mkCompileContext = CompileCtxPattern
-instance HasCompileContext (Decl Rewritten) where
+instance HasCompileContext (Decl Typed) where
   mkCompileContext = CompileCtxDecl
 
 -- | The Grappa compilation errors
@@ -110,7 +110,6 @@ data GrappaError = GErrorParse ParseError
                  | GErrorEmit EmitError
                  | GErrorTypeCheck TypeError
                  | GErrorMisc String
-                 | GErrorMatching PatternMatchError
                  | GErrorContext GrappaError CompileContext
                  deriving Show
 
@@ -125,9 +124,6 @@ instance PP.Pretty GrappaError where
     PP.text "Type error:" PP.<$$> PP.nest 2 (PP.pretty err)
   pretty (GErrorMisc err) =
     PP.text "Compilation error:" PP.<+> PP.text err
-  pretty (GErrorMatching err) =
-    -- FIXME: implement pretty-printing for matching errors
-    PP.text "Pattern-matching error:" PP.<+> PP.text (show err)
   pretty (GErrorContext err ctx) =
     PP.pretty err PP.<$$>
     PP.text "In compiling" PP.<$$> PP.nest 2 (PP.pretty ctx)
@@ -138,7 +134,7 @@ data CompileEnv =
                compile_res_env :: ResolveEnv,
                compile_current_function :: Maybe Ident,
                compile_fix_parameter :: Maybe TH.Name,
-               compile_model_subcase_vpatt :: Maybe (CompiledPattern Rewritten),
+               compile_model_subcase_vpatt :: Maybe (Pattern Typed),
                compile_debug_handle :: Maybe Handle }
 
 -- | Build an empty 'CompileEnv', given a TH name for the @c@ variable and an
@@ -172,7 +168,7 @@ withCompileCtx ctx_obj m =
   catchError m (\e -> throwError (GErrorContext e ctx))
 
 -- | Get the top-level V-pattern used by the current model case
-getModelSubCasePattern :: Compile (CompiledPattern Rewritten)
+getModelSubCasePattern :: Compile (Pattern Typed)
 getModelSubCasePattern =
   do maybe_patt <- compile_model_subcase_vpatt <$> get
      case maybe_patt of
@@ -181,7 +177,7 @@ getModelSubCasePattern =
        Nothing -> error "getModelSubCasePattern: missing model case pattern!"
 
 -- | Run a 'Compile' computation using a given model case pattern
-withModelSubCasePattern :: Pattern Rewritten -> Compile a -> Compile a
+withModelSubCasePattern :: Pattern Typed -> Compile a -> Compile a
 withModelSubCasePattern patt m =
   do saved_env <- get
      put $ saved_env { compile_model_subcase_vpatt = Just patt }
@@ -247,10 +243,6 @@ instance SubMonad TypeCheck Compile where
     do debugH <- compile_debug_handle <$> get
        lift $ withExceptT GErrorTypeCheck $ ExceptT $ runTypeCheck debugH m
 
-instance SubMonad MatchM Compile where
-  embedM m =
-    fmap fst $ lift $ withExceptT GErrorMatching $ runStateT m emptyMatchEnv
-
 -- | Run a 'Compile' computation in the 'TH.Q' monad
 runCompile :: Compile a -> TH.Q a
 runCompile m =
@@ -287,6 +279,9 @@ mkIdTHExp expr = applyTHExp (TH.ConE 'Id) [expr]
 mkIdTHPat :: TH.Pat -> TH.Pat
 mkIdTHPat patt = TH.ConP 'Id [patt]
 
+-- FIXME HERE: revisit the next 13 functions, fixing up their names to better
+-- reflect what they do and maybe use them more in the code below
+
 -- | Build a TH expression of type @'ADT' adt 'Id'@ for a Grappa constructor of
 -- @adt@ and its argument expressions
 mkADTCtorTHExp :: CtorInfo -> [TH.Exp] -> TH.Exp
@@ -294,6 +289,15 @@ mkADTCtorTHExp ctor args_th =
   if ctor_is_adt ctor then
     applyTHExp (TH.ConE 'ADT) [applyTHExp (TH.ConE $ ctor_th_name ctor) $
                                map mkIdTHExp args_th]
+  else
+    error "mkADTCtorTHExp: non-ADT constructor"
+
+-- | Build a TH expression of type @adt ('GExpr' repr) (ADT adt)@ for a Grappa
+-- constructor of @adt@ and its argument expressions
+mkADTCtorTHExpInterp :: CtorInfo -> [TH.Exp] -> TH.Exp
+mkADTCtorTHExpInterp ctor args_th =
+  if ctor_is_adt ctor then
+    applyTHExp (TH.ConE $ ctor_th_name ctor) args_th
   else
     error "mkADTCtorTHExp: non-ADT constructor"
 
@@ -404,6 +408,7 @@ mkFormatTHExp "json" = return (TH.ConE 'JSON)
 mkFormatTHExp str =
   throwError (GErrorMisc ("Unknown input format '" ++ str ++ "'"))
 
+
 --
 -- * Compiling Grappa to TH
 --
@@ -421,17 +426,26 @@ instance Compilable Type TH.Type where
 instance Compilable TopType TH.Type where
   compile top_tp = withCompileCtx top_tp $ embedM $ emitTopType top_tp
 
-instance Compilable (Name Rewritten) TH.Exp where
+-- | Compile a Grappa identifier to a 'TH.Name'
+compileIdent :: Ident -> TH.Name
+compileIdent var = TH.mkName $ T.unpack var
+
+-- | Compile an identifier that represents a 'GVExpr' variable to a 'TH.Name'
+-- distinct from the one returned by the normal 'compile', by prepending "v__"
+compileVIdent :: Ident -> TH.Name
+compileVIdent var = TH.mkName $ "v__" ++ (T.unpack var)
+
+instance Compilable (Name Typed) TH.Exp where
   compile (LocalName x) = do
     -- If this isn't set, then we're doing something wrong
     Just curr <- compile_current_function <$> get
     Just self <- compile_fix_parameter <$> get
-    return $ TH.VarE $ if curr == x then self else TH.mkName (T.unpack x)
+    return $ TH.VarE $ if curr == x then self else compileIdent x
   compile (GlobalName nm) = return $ TH.VarE $ gname_th_name nm
   compile (CtorName ctor) =
     return $ mkCtorLamTHExpInterp ctor []
 
-instance Compilable (Exp Rewritten) TH.Exp where
+instance Compilable (Exp Typed) TH.Exp where
   compile expr = withCompileCtx expr $ go expr where
     go (NameExp nm _tp) = compile nm
     go (LiteralExp (IntegerLit i) _) = do
@@ -458,32 +472,32 @@ instance Compilable (Exp Rewritten) TH.Exp where
     go (LetExp n _ lhs rhs _) = do
       lhs_th <- compile lhs
       rhs_th <- compile rhs
-      return $ TH.LetE [TH.ValD (TH.VarP $ TH.mkName $ T.unpack n)
+      return $ TH.LetE [TH.ValD (TH.VarP $ compileIdent n)
                         (TH.NormalB lhs_th) []] rhs_th
     go (CaseExp scrut cases _) =
-      compileInterpCase scrut cases
-    go (ModelExp cases _) = do
-      compileSubCases cases
+      compileCaseExp scrut cases
+    go (ModelExp cases _) =
+      do n_th <- embedM $ TH.newName "v__"
+         body_th <- compileModelBody n_th cases
+         return $ applyTHExp (TH.VarE 'interp__'mkDist)
+           [TH.LamE [TH.VarP n_th] body_th]
     go (IfExp c t e _) = do
       c_th <- compile c
       t_th <- compile t
       e_th <- compile e
       return $ applyTHExp (TH.VarE 'interp__'ifThenElse) [c_th, t_th, e_th]
-    go (FunExp (FunCase pats body) _) = do
-      let pats_th = map compileVarPat pats
-      body_th <- compile body
-      return $ mkLamInterp pats_th body_th
+    go (FunExp fun_case _) = compileFunExp [fun_case]
     go (ListExp enabled _) = notEnabled enabled
     go (ParensExp enabled _) = notEnabled enabled
     go (OpExp enabled _ _ _) = notEnabled enabled
 
 -- | "Raw", non-interpreted compilation of expressions, for, e.g., parameters to
 -- inference methods
-rawCompileExpr :: Exp Rewritten -> Compile TH.Exp
+rawCompileExpr :: Exp Typed -> Compile TH.Exp
 rawCompileExpr e = withCompileCtx e $ compile' e where
-  compile' :: Exp Rewritten -> Compile TH.Exp
+  compile' :: Exp Typed -> Compile TH.Exp
   compile' (NameExp (LocalName x) _) =
-    return $ TH.VarE $ TH.mkName $ T.unpack x
+    return $ TH.VarE $ compileIdent x
   compile' (NameExp (GlobalName nm) _) =
     case gname_raw_th_name nm of
       Just th_nm -> return $ TH.VarE th_nm
@@ -513,7 +527,7 @@ rawCompileExpr e = withCompileCtx e $ compile' e where
   compile' (LetExp n _ lhs rhs _) =
     do lhs_th <- compile' lhs
        rhs_th <- compile' rhs
-       return $ TH.LetE [TH.ValD (TH.VarP $ TH.mkName $ T.unpack n)
+       return $ TH.LetE [TH.ValD (TH.VarP $ compileIdent n)
                          (TH.NormalB lhs_th) []] rhs_th
   compile' (CaseExp _scrut _cases _) =
     throwError $ GErrorMisc $
@@ -532,78 +546,182 @@ rawCompileExpr e = withCompileCtx e $ compile' e where
 
 
 --
--- ** Pattern-Matching Compilation
+-- ** Pattern-Matching Expression Compilation
 --
 
-class (Compilable body TH.Exp) => CaseType r body | r -> body where
-  getPattern :: r -> Pattern Rewritten
-  getBody    :: r -> body
-  getTupleProjector :: r -> TH.Name
+-- | Compile a tuple pattern with the given names for the pattern variables
+compileTuplePatt :: [TH.Name] -> TH.Pat
+compileTuplePatt [] = TH.ConP 'Tuple0 []
+compileTuplePatt [a] = TH.ConP 'Tuple1 [TH.VarP a]
+compileTuplePatt ns@[_,_] = TH.ConP 'Tuple2 (map TH.VarP ns)
+compileTuplePatt ns@[_,_,_] = TH.ConP 'Tuple3 (map TH.VarP ns)
+compileTuplePatt ns@[_,_,_,_] = TH.ConP 'Tuple4 (map TH.VarP ns)
+compileTuplePatt (a:b:c:d:e:ns') =
+  TH.ConP 'TupleN [TH.VarP a, TH.VarP b, TH.VarP c, TH.VarP  d, TH.VarP e,
+                   compileTuplePatt ns']
 
-instance CaseType (ExpCase Rewritten) (Exp Rewritten) where
-  getPattern (ExpCase pat _ _ _) = pat
-  getBody (ExpCase _ body _ _) = body
-  getTupleProjector _ = 'interp__'projTuple
+-- | Compile a single branch of a @case@ expression, that matches a sequence of
+-- arguments (bound to TH names) with a sequence of patterns, into a 'GMatch'
+compileMatchBranch :: [TH.Name] -> [Pattern Typed] -> TH.Exp -> TH.Q TH.Exp
+compileMatchBranch [] [] body = [| interp__'matchBody $(return body) |]
+compileMatchBranch (n:ns) (VarPat x _:patts) body =
+  do body_th <- compileMatchBranch ns patts body
+     return $ TH.LetE [TH.ValD (TH.VarP $ compileIdent x)
+                       (TH.NormalB $ TH.VarE n) []] body_th
+compileMatchBranch (_:ns) (WildPat _:patts) body =
+  compileMatchBranch ns patts body
+compileMatchBranch (n:ns) (TuplePat arg_patts _:patts) body =
+  do sub_ns <- mapM (const $ TH.newName "arg_") arg_patts
+     body_th <-
+       TH.LamE [compileTuplePatt sub_ns] <$>
+       compileMatchBranch (sub_ns ++ ns) (arg_patts ++ patts) body
+     [| interp__'matchTuple $(TH.varE n) $(return body_th) |]
+compileMatchBranch (n:ns) (CtorPat ctor ctor_patts _:patts) body =
+  do arg_ns <- mapM (const $ TH.newName "arg_") ctor_patts
+     let proxy =
+           applyTHExp (TH.ConE (ctor_th_name ctor)) $
+           replicate (ctorArity ctor) (TH.ConE 'Proxy)
+         matcher =
+           TH.VarE $ TH.mkName $
+           "ctorMatcher__" ++ TH.nameBase (ctor_th_name ctor)
+     body_th <-
+       TH.LamE [TH.ConP (ctor_th_name ctor) (map TH.VarP arg_ns)] <$>
+       compileMatchBranch (arg_ns ++ ns) (ctor_patts ++ patts) body
+     [| interp__'matchADT $(TH.varE n) $(return proxy)
+      $(return matcher) $(return body_th) |]
+compileMatchBranch (n:ns) (LitPat lit _:patts) body =
+  do lit_th <-
+       case lit of
+         IntegerLit i -> [| interp__'integer $(TH.litE (TH.IntegerL i)) |]
+         RationalLit r -> [| interp__'rational $(TH.litE (TH.RationalL r)) |]
+     body_th <- compileMatchBranch ns patts body
+     [| interp__'matchGuard
+      (interp__'app (interp__'app interp__'eq'eq $(TH.varE n)) $(return lit_th))
+      $(return body_th) |]
+compileMatchBranch (n:ns) (SigPat patt _:patts) body =
+  compileMatchBranch (n:ns) (patt:patts) body
+compileMatchBranch (_:_) [] _ =
+  error "Compiler error: mismatched number of names and patterns"
+compileMatchBranch [] (_:_) _ =
+  error "Compiler error: mismatched number of names and patterns"
 
-instance CaseType (StmtCase Rewritten) (Stmt Rewritten) where
-  getPattern (StmtCase pat _ _) = pat
-  getBody (StmtCase _ body _) = body
-  getTupleProjector _ = 'interp__'projTupleStmt
 
-instance CaseType (ModelSubCase Rewritten) (Stmt Rewritten) where
-  getPattern (ModelSubCase pat _ _) = pat
-  getBody (ModelSubCase _ _ body) = body
-  getTupleProjector _ = 'interp__'projTupleStmt
+-- | Combine a list of expressions, that are the result of compiling a list of
+-- case expression branches, into a single 'GMatch' expression
+combineMatchBranches :: [TH.Exp] -> TH.Q TH.Exp
+combineMatchBranches [] = [| interp__'matchFail |]
+combineMatchBranches (match:matches') =
+  [| interp__'matchDisj $(return match) $(combineMatchBranches matches') |]
 
-compileInterpCase :: (Show r, CaseType r b) => Exp Rewritten -> [r] -> Compile TH.Exp
-compileInterpCase scrut cases
-  | any isCtor cases = do
-      scrut_th <- compile scrut
-      cases_th <- forM cases $ \ cs -> do
-        patt_th <- compile (getPattern cs)
-        body_th <- compile (getBody cs)
-        return $ TH.Match patt_th (TH.NormalB body_th) []
-      scr_var <- embedM $ TH.newName "scrut"
-      return $ applyTHExp (TH.VarE 'interp__'projADT)
-        [ scrut_th
-        , TH.LamE [TH.VarP scr_var] $
-            TH.CaseE (TH.VarE scr_var) cases_th
-        ]
-  | any isLit cases = do
-      scrut_th <- compile scrut
-      compileLitMatch scrut_th cases
-  | [cs] <- cases
-  , CompiledTuplePat pats _ <- getPattern cs = do
-      scrut_th <- compile scrut
-      let pat_th = map compileVarPat pats
-      body_th <- compile (getBody cs)
-      return $ applyTHExp (TH.VarE (getTupleProjector cs))
-        [ scrut_th
-        , TH.LamE [mkTupleBodyTHPat pat_th] body_th
-        ]
-  | [] <- cases = error "Unexpected empty case alternatives list"
-  | otherwise = error ("Unsure how to deal with these pattern matches: " ++ show cases)
-  where isCtor (getPattern->CompiledCtorPat {}) = True
-        isCtor _ = False
-        isLit (getPattern->CompiledLitPat {}) = True
-        isLit _ = False
+-- | Compile a case expression with a single scrutinee and a list of cases
+compileCaseExp :: Exp Typed -> [ExpCase Typed] -> Compile TH.Exp
+compileCaseExp scrut cases =
+  do
+    -- Generate a TH name for the result of the scrutinee
+    n_th <- embedM $ TH.newName "scrutinee_"
+    -- Compile the scrutinee and each branch of the case expression
+    scrut_th <- compile scrut
+    cases_th <-
+      mapM (\(ExpCase patt body _ _) ->
+             do body_th <- compile body
+                embedM $ compileMatchBranch [n_th] [patt] body_th) cases
+    -- Return the case expression inside a let-binding for the scrutinee
+    body_th <-
+      embedM $ [| interp__'match $(combineMatchBranches cases_th) |]
+    return $ TH.LetE [TH.ValD (TH.VarP n_th) (TH.NormalB scrut_th) []] body_th
 
-compileLitMatch :: (Show r, CaseType r b) => TH.Exp -> [r] -> Compile TH.Exp
-compileLitMatch _ [cs] | CompiledBasicPattern _ <- getPattern cs =
-  compile (getBody cs)
-compileLitMatch scrut (cs:rs) | CompiledLitPat l tp <- getPattern cs = do
-  l_th <- compile (LiteralExp l tp :: Exp Rewritten)
-  c_th <- compile (getBody cs)
-  e_th <- compileLitMatch scrut rs
-  let cmp = TH.VarE $ case l of
-        IntegerLit _  -> 'interp__'eqInteger
-        RationalLit _ -> 'interp__'eqRational
-  let cond_th = applyTHExp cmp [scrut, l_th]
-  return $ applyTHExp (TH.VarE 'interp__'ifThenElse) [cond_th, c_th, e_th]
-compileLitMatch _ (cs:_) =
-  error ("Unexpected pattern in compiling literal matches: " ++ show (getPattern cs))
-compileLitMatch _ [] =
-  error "Unexpected empty cases in compiling literal matches"
+-- | Compile a pattern-matching function definition or declaration to a 'GExpr'
+compileFunExp :: [FunCase Typed] -> Compile TH.Exp
+compileFunExp [] = error "compileFunExp: empty list of function cases!"
+compileFunExp cases@(FunCase head_patts _:_) =
+  do
+    -- Generate names for all the arguments
+    ns_th <- embedM $ mapM (const $ TH.newName "x_") head_patts
+    -- Compile each branch of the pattern-matching function
+    cases_th <-
+      mapM (\(FunCase patts body) ->
+             do body_th <- compile body
+                embedM $ compileMatchBranch ns_th patts body_th) cases
+    -- Return the case expression inside a lambda for all the arguments
+    body_th <-
+      embedM $ [| interp__'match $(combineMatchBranches cases_th) |]
+    return $ foldr (\n e ->
+                     TH.AppE (TH.VarE 'interp__'lam) $
+                     TH.LamE [TH.VarP n] e) body_th ns_th
+
+
+--
+-- ** Pattern-Matching Over V-Expressions
+--
+
+-- | Compile a single branch of a @case@ statement over, that matches a sequence of
+-- arguments (bound to TH names) with a sequence of patterns, into a 'GVMatchOne'
+compileVMatchBranch :: [TH.Name] -> [Pattern Typed] -> TH.Exp -> TH.Q TH.Exp
+compileVMatchBranch [] [] body = [| interp__'vmatchBody $(return body) |]
+compileVMatchBranch (n:ns) (VarPat x _:patts) body =
+  do body_th <- compileVMatchBranch ns patts body
+     return $ TH.LetE [TH.ValD (TH.VarP $ compileVIdent x)
+                       (TH.NormalB $ TH.VarE n) []] body_th
+compileVMatchBranch (_:ns) (WildPat _:patts) body =
+  compileVMatchBranch ns patts body
+compileVMatchBranch (n:ns) (TuplePat arg_patts _:patts) body =
+  do sub_ns <- mapM (const $ TH.newName "arg_") arg_patts
+     body_th <-
+       TH.LamE [compileTuplePatt sub_ns] <$>
+       compileVMatchBranch (sub_ns ++ ns) (arg_patts ++ patts) body
+     [| interp__'vmatchTuple $(TH.varE n) $(return body_th) |]
+compileVMatchBranch (n:ns) (CtorPat ctor ctor_patts _:patts) body =
+  do arg_ns <- mapM (const $ TH.newName "arg_") ctor_patts
+     let proxy =
+           applyTHExp (TH.ConE (ctor_th_name ctor)) $
+           replicate (ctorArity ctor) (TH.ConE 'Proxy)
+         matcher =
+           TH.VarE $ TH.mkName $
+           "ctorMatcher__" ++ TH.nameBase (ctor_th_name ctor)
+     body_th <-
+       TH.LamE [TH.ConP (ctor_th_name ctor) (map TH.VarP arg_ns)] <$>
+       compileVMatchBranch (arg_ns ++ ns) (ctor_patts ++ patts) body
+     [| interp__'vmatchADT $(TH.varE n) $(return proxy)
+      $(return matcher) $(return body_th) |]
+compileVMatchBranch (n:ns) (LitPat lit _:patts) body =
+  do lit_th <-
+       case lit of
+         IntegerLit i -> [| interp__'integer $(TH.litE (TH.IntegerL i)) |]
+         RationalLit r -> [| interp__'rational $(TH.litE (TH.RationalL r)) |]
+     body_th <- compileVMatchBranch ns patts body
+     [| interp__'vmatchGuard
+      (interp__'app (interp__'app interp__'eq'eq $(TH.varE n)) $(return lit_th))
+      $(return body_th) |]
+compileVMatchBranch ns (SigPat patt _:patts) body =
+  compileVMatchBranch ns (patt:patts) body
+compileVMatchBranch (_:_) [] _ =
+  error "Compiler error: mismatched number of names and patterns"
+compileVMatchBranch [] (_:_) _ =
+  error "Compiler error: mismatched number of names and patterns"
+
+
+-- | Compile a sequence of 'ModelCase's into a 'GVMatch' pattern-matching
+-- statement over v-expressions
+compileModelCases :: TH.Name -> [ModelCase Typed] -> Compile TH.Exp
+compileModelCases _ [] = embedM [| interp__'vmatchFail |]
+compileModelCases n_th (ModelCase patt prob_exp body : cases) =
+  do prob_exp_th <- compile prob_exp
+     body_th <- withModelSubCasePattern patt $ compile body
+     case_th <- embedM $ compileVMatchBranch [n_th] [patt] body_th
+     cases_th <- compileModelCases n_th cases
+     embedM [| interp__'vmatchDisj $(return prob_exp_th) $(return case_th)
+             $(return cases_th) |]
+
+-- | Compile the body of a @model@ expression to a 'GStmt'
+compileModelBody :: TH.Name -> [ModelCase Typed] -> Compile TH.Exp
+compileModelBody n_th [ModelCase patt _ body] =
+  -- Special case: for only a single case, use interp__'vmatch1
+  do body_th <- withModelSubCasePattern patt $ compile body
+     case_th <- embedM $ compileVMatchBranch [n_th] [patt] body_th
+     embedM [| interp__'vmatch1 $(return case_th) |]
+compileModelBody n_th cases =
+  do body_th <- compileModelCases n_th cases
+     embedM [| interp__'vmatch $(return body_th) |]
 
 
 --
@@ -624,7 +742,7 @@ compileFileSource filename fmt tp = do
           error "File read at non-list type!"
   let file_th = case filename of
         FileStringLit lt -> TH.litE (TH.StringL (T.unpack lt))
-        FileVarName   nm -> TH.varE (TH.mkName (T.unpack nm))
+        FileVarName   nm -> TH.varE (compileIdent nm)
   tp_th <- compile tp
   fmt_th <- mkFormatTHExp (T.unpack fmt)
   embedM [|
@@ -635,53 +753,14 @@ compileFileSource filename fmt tp = do
         :: Source $(return tp_th)
         |]
 
-{-
-compileBasicDistVarPatt :: CompiledVarPattern Rewritten -> Compile TH.Pat
-compileBasicDistVarPatt (VarCPat x tp) = do
-  tp_th <- compile tp
-  let dv_tp = TH.AppT (TH.ConT ''DistVar) tp_th
-  return $ TH.SigP (TH.VarP $ TH.mkName $ T.unpack x) (dv_tp)
-compileBasicDistVarPatt (WildCPat _) = embedM [p| _ |]
-
--- | Compile a Grappa pattern into a TH pattern over 'DistVar's
-compileDistVarPatt :: Pattern Rewritten -> Compile TH.Pat
-compileDistVarPatt (CompiledBasicPattern pat) =
-  compileBasicDistVarPatt pat
-compileDistVarPatt (CompiledCtorPat ctor patts _) =
-  do patts_th <- mapM compileBasicDistVarPatt patts
-     param_args_th <- forM patts_th $ \_ -> embedM [| VParam |]
-     embedM [p| (matchADTDistVar
-                 $(return $
-                   applyTHExp (TH.ConE $ ctor_th_name ctor) param_args_th) ->
-                 ($(return $ TH.ConP (ctor_th_name ctor) patts_th))) |]
-compileDistVarPatt (CompiledTuplePat patts _) =
-  do patts_th <- mapM compileBasicDistVarPatt patts
-     param_args_th <- forM patts_th $ \_ -> embedM [| VParam |]
-     embedM [p| (matchADTDistVar
-                 $(return $ mkTupleBodyTHExp param_args_th) ->
-                 ($(return $ mkTupleBodyTHPat patts_th))) |]
-compileDistVarPatt (CompiledLitPat _ (ADTType _ _)) =
-  error "compileDistVarPatt: literal pattern of ADT type!"
-compileDistVarPatt (CompiledLitPat (IntegerLit i) _) =
-  embedM $ [p| (matchAtomicDistVar $(TH.litE $ TH.IntegerL i) -> True) |]
-compileDistVarPatt (CompiledLitPat (RationalLit r) _) =
-  embedM $ [p| (matchAtomicDistVar $(TH.litE $ TH.RationalL r) -> True) |]
-
-compileArmExpr :: ListCompArm Rewritten -> Compile TH.Exp
-compileArmExpr lca@(ListCompArm _ ge) = withCompileCtx lca $ compile ge
-
-compileArmPat :: [ListCompArm Rewritten] -> Compile TH.Pat
-compileArmPat [ListCompArm pat _] = compileDistVarPatt pat
--}
-
-compileArmExpr :: ListCompArm Rewritten -> Compile TH.Exp
+compileArmExpr :: ListCompArm Typed -> Compile TH.Exp
 compileArmExpr _ = error "FIXME"
 
-compileArmPat :: [ListCompArm Rewritten] -> Compile TH.Pat
+compileArmPat :: [ListCompArm Typed] -> Compile TH.Pat
 compileArmPat _ = error "FIXME"
   -- do
   --   let pats = [ (pat, case pat of
-  --                    _ -> getTypeOf pat)
+  --                    _ -> typeOf pat)
   --              | ListCompArm pat _ <- lcs ]
   --   compileDistVarPatt (CompiledTuplePat (map fst pats) (TupleType (map snd pats)))
 
@@ -692,14 +771,14 @@ zipTypes t1 t2
   = return (mkListType (TupleType [e1, e2]))
 zipTypes _ _ = error "Trying to zip a non-list!"
 
-instance Compilable (GenExp Rewritten) TH.Exp where
+instance Compilable (GenExp Typed) TH.Exp where
   compile ge = withCompileCtx ge $ compile' ge where
     compile' (VarGenExp nm tp) = do
       let nm_th = (TH.AppE (TH.VarE 'allowUnused) (TH.VarE nm))
       tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
       return (TH.SigE nm_th tp_th)
     compile' (BoundVarGenExp nm tp) =
-      let nm' = TH.mkName $ T.unpack nm
+      let nm' = compileIdent nm
       in TH.SigE (TH.AppE (TH.VarE 'allowUnused) (TH.VarE nm')) <$>
          TH.AppT (TH.ConT ''Source) <$> compile tp
     compile' (FileGenExp filename fmt tp) =
@@ -722,16 +801,16 @@ instance Compilable (GenExp Rewritten) TH.Exp where
       tp_th <- TH.AppT (TH.ConT ''Source) <$> compile tp
       return (TH.SigE ee_th tp_th)
 
-instance Compilable (SourceExp Rewritten) TH.Exp where
+instance Compilable (SourceExp Typed) TH.Exp where
   compile sexp = withCompileCtx sexp $ compile' sexp where
-    compile' :: SourceExp Rewritten -> Compile TH.Exp
+    compile' :: SourceExp Typed -> Compile TH.Exp
     compile' (VarSrcExp nm tp) =
       -- "Global" variables should always have type Source a, as they should
       -- only be referring to defined source expressions
       TH.SigE (TH.VarE nm) <$> TH.AppT (TH.ConT ''Source) <$> compile tp
     compile' (BoundVarSrcExp nm tp) =
       -- Bound variables always have type GrappaData a, so apply SourceData
-      let nm' = TH.mkName $ T.unpack nm in
+      let nm' = compileIdent nm in
       TH.SigE (applyTHExp (TH.ConE 'SourceData) [TH.VarE nm']) <$>
       TH.AppT (TH.ConT ''Source) <$> compile tp
     compile' (WildSrcExp tp) =
@@ -759,7 +838,7 @@ instance Compilable (SourceExp Rewritten) TH.Exp where
             rExpr <- compileArmExpr rArm
             lName <- lift $ lift $ TH.newName "l"
             rName <- lift $ lift $ TH.newName "r"
-            let rTyp = getTypeOf rExp
+            let rTyp = typeOf rExp
             typ   <- zipTypes lTyp rTyp
             typTH <- TH.AppT (TH.ConT ''Source) <$> compile typ
             let innerFun = applyTHExp (TH.ConE 'SourceBind)
@@ -778,7 +857,7 @@ instance Compilable (SourceExp Rewritten) TH.Exp where
                    )
       zipped_th <- let (a@(ListCompArm _ aExp):as) = arms in do
         aExpr  <- compileArmExpr a
-        let aTyp = getTypeOf aExp
+        let aTyp = typeOf aExp
         foldM zip_srcs (aExpr, aTyp) as
       tp_th <- compile tp
       let src_tp = TH.AppT (TH.ConT ''Source) tp_th
@@ -788,7 +867,7 @@ instance Compilable (SourceExp Rewritten) TH.Exp where
         , fst zipped_th
         ]
 
-instance Compilable (GPriorStmt Rewritten) TH.Exp where
+instance Compilable (GPriorStmt Typed) TH.Exp where
   compile stmt = withCompileCtx stmt $ compile' stmt where
     compile' (GPriorStmt lhs rhs) = do
       lhs_th <- compile lhs
@@ -802,29 +881,6 @@ instance Compilable (GPriorStmt Rewritten) TH.Exp where
 -- ** Statements and Top-level Forms
 --
 
-instance Compilable (StmtCase Rewritten) TH.Match where
-  compile (StmtCase patt body _) = do
-    patt_th <- compile patt
-    body_th <- compile body
-    return $ TH.Match patt_th (TH.NormalB body_th) []
-
-instance Compilable (ExpCase Rewritten) TH.Match where
-  compile (ExpCase patt body _ _) = do
-    patt_th <- compile patt
-    body_th <- compile body
-    return $ TH.Match patt_th (TH.NormalB body_th) []
-
-instance Compilable (CompiledPattern Rewritten) TH.Pat where
-  compile p = withCompileCtx p $ compile' p where
-    compile' (CompiledBasicPattern pat) = return $ compileVarPat pat
-    compile' (CompiledCtorPat ctor patts _) = do
-      let patts_th = map compileVarPat patts
-      return $ TH.ConP (ctor_th_name ctor) patts_th
-    compile' (CompiledTuplePat patts _) =
-      return (mkTupleTHPat (map compileVarPat patts))
-    compile' (CompiledLitPat (IntegerLit i) _) = return $ TH.LitP $ TH.IntegerL i
-    compile' (CompiledLitPat (RationalLit r) _) = return $ TH.LitP $ TH.RationalL r
-
 -- We compile v-expressions into expresssions that build them and patterns that
 -- destruct them. For v-expressions that are "generated", which includes
 -- wildcards and lifted expression, we need to generate them in a statement
@@ -833,17 +889,19 @@ instance Compilable (CompiledPattern Rewritten) TH.Pat where
 -- well as the interp method needed to generate them, which should have type
 --
 -- (GVExpr repr a -> GStmt repr b) -> GStmt repr b
-instance Compilable (VExp Rewritten) ((TH.Exp, TH.Exp -> TH.Exp), [(TH.Name, TH.Exp)]) where
+instance Compilable (VExp Typed) ((TH.Exp, TH.Exp -> TH.Exp),
+                                  [(TH.Name, TH.Exp)]) where
   compile ve = withCompileCtx ve $ runWriterT $ go ve where
-    go :: VExp Rewritten -> WriterT [(TH.Name, TH.Exp)] Compile (TH.Exp, TH.Exp -> TH.Exp)
+    go :: VExp Typed ->
+          WriterT [(TH.Name, TH.Exp)] Compile (TH.Exp, TH.Exp -> TH.Exp)
     go (VarVExp n True _) = do
-      let expr = TH.VarE (TH.mkName ("v__" ++ T.unpack n))
-          pat = TH.VarP (TH.mkName (T.unpack n))
+      let expr = TH.VarE $ compileVIdent n
+          pat = TH.VarP $ compileIdent n
       return (expr, TH.LamE [pat])
     go (VarVExp n False _) = do
-      let n_th = TH.mkName ("v__" ++ T.unpack n)
+      let n_th = compileVIdent n
           expr = TH.VarE n_th
-          pat = TH.VarP (TH.mkName (T.unpack n))
+          pat = TH.VarP $ compileIdent n
       tell [(n_th, TH.VarE 'interp__'vwild)]
       return (expr, TH.LamE [pat])
     go (WildVExp _) = do
@@ -875,30 +933,32 @@ instance Compilable (VExp Rewritten) ((TH.Exp, TH.Exp -> TH.Exp), [(TH.Name, TH.
                        (mkBody fresh_vars vars body)
                      ]
              )
-    go xs = error ("FIXME in Compilable VExp: " ++ show xs)
+    go (CtorVExp _ _ _) =
+      error "FIXME HERE: cannot yet compile constructor v-expressions"
+
 
 -- | Compile the pattern for the current model sub-case to a TH expression,
 -- whose value is the return value for the current sub-case
-compilePattInterp :: Compile TH.Exp
-compilePattInterp = getModelSubCasePattern >>= helper where
-  go' (VarCPat x _) =
-    return $ TH.VarE $ TH.mkName $ T.unpack x
-  go' (WildCPat _) =
+compileReturnValue :: Compile TH.Exp
+compileReturnValue = getModelSubCasePattern >>= helper where
+  helper :: Pattern Typed -> Compile TH.Exp
+  helper (VarPat x _) = return $ TH.VarE $ compileIdent x
+  helper (WildPat _) =
     error "Unexpected wildcard pattern in model subcase!"
-  helper :: Pattern Rewritten -> Compile TH.Exp
-  helper (CompiledBasicPattern pat) = go' pat
-  helper (CompiledCtorPat ctor patts _) =
-    mkADTCtorTHExp ctor <$> mapM go' patts
-  helper (CompiledTuplePat patts _) = do
-    patts_th <- mkTupleBodyTHExp <$> mapM go' patts
-    return (TH.AppE (TH.VarE 'interp__'injTuple) patts_th)
-  helper (CompiledLitPat (IntegerLit i) _) = return $ TH.LitE $ TH.IntegerL i
-  helper (CompiledLitPat (RationalLit r) _) = return $ TH.LitE $ TH.RationalL r
+  helper (CtorPat ctor patts _) =
+    do adt_th <- mkADTCtorTHExpInterp ctor <$> mapM helper patts
+       embedM [| interp__'injADT $(return adt_th) |]
+  helper (TuplePat patts _) =
+    do tuple_th <- mkTupleBodyTHExp <$> mapM helper patts
+       embedM [| interp__'injTuple $(return tuple_th) |]
+  helper (LitPat (IntegerLit i) _) = return $ TH.LitE $ TH.IntegerL i
+  helper (LitPat (RationalLit r) _) = return $ TH.LitE $ TH.RationalL r
+  helper (SigPat patt _) = helper patt
 
-instance Compilable (Stmt Rewritten) TH.Exp where
+instance Compilable (Stmt Typed) TH.Exp where
   compile stmt = withCompileCtx stmt $ go stmt where
     go ReturnStmt = do
-      rs <- compilePattInterp
+      rs <- compileReturnValue
       return $ TH.AppE (TH.VarE 'interp__'return) rs
     go (SampleStmt lhs rhs body) = do
       ((lhs_th, pat_th), vexp_vars_gens) <- compile lhs
@@ -911,153 +971,16 @@ instance Compilable (Stmt Rewritten) TH.Exp where
         vexp_vars_gens $
         applyTHExp (TH.VarE 'interp__'sample) [rhs_th, lhs_th, body_lam]
     go (LetStmt x rhs body) = do
-      let lhs_th = TH.VarP (TH.mkName (T.unpack x))
+      let lhs_th = TH.VarP $ compileIdent x
       rhs_th <- compile rhs
       body_th <- compile body
       return $ TH.LetE [TH.ValD lhs_th (TH.NormalB rhs_th) []] body_th
-    go (CaseStmt e cs) =
-      compileInterpCase e cs
+    go (CaseStmt _e _cs) =
+      error "FIXME HERE: case statements not (yet?) supported"
 
-compileBranch :: ModelSubCase Rewritten -> Compile [TH.Exp]
-compileBranch (ModelSubCase (CompiledCtorPat _ ps _) prob_e stmt) = do
-  prob <- case prob_e of
-    Nothing -> return $ TH.AppE (TH.VarE 'interp__'rational) (TH.LitE (TH.RationalL 1.0))
-    Just e  -> compile e
-  let pat = CompiledTuplePat ps (TupleType [])
-  pat_th <- compileVExprPatternInterp pat
-  body_th <- withModelSubCasePattern pat $ compile stmt
-  body <- embedM [| interp__'mkDist $(return (pat_th body_th)) |]
-  return [ prob, body ]
-compileBranch _ =
-  error "Language.Grappa.Frontend.Compile.compileBranch: unreachable"
 
--- | We need to convert all pattern-matches into calls to the
--- catamorphism over the ADT we've created; to do this, we need to
--- know the order of the constructors. We loop over the constructors
--- listed in the TypeNameInfo in order and find the matching case.
--- TODO: handle more complicated cases, like nested patterns!
-compileCtorCases :: TypeNameInfo -> [ModelSubCase Rewritten] -> Compile TH.Exp
-compileCtorCases _ [cs@(ModelSubCase (CompiledCtorPat n _ _) _ _)] = do
-  let ctor_name = ctor_th_name n
-      interp_ctor = TH.mkName ("interp__ctorDist__" ++ TH.nameBase ctor_name)
-  [_, body_th] <- compileBranch cs
-  let dist = applyTHExpInterp (TH.VarE interp_ctor) [body_th]
-  embedM [| (\ v -> interp__'sample $(return dist) v interp__'return) |]
-compileCtorCases info cs = do
-  let findConstructor n = case [ c | c@(ModelSubCase (CompiledCtorPat n' _ _) _ _) <- cs
-                                   , ctor_th_name n' == adt_ctor_th_name n
-                                   ] of
-                             [c] -> return c
-                             []  -> fail ("Unable to find case for " ++ show n)
-                             _   -> fail "Unable to handle overlapping cases"
-  case tn_ctors info of
-    Nothing -> fail "Pattern-matching over a non-ADT"
-    Just ts -> do
-      pats <- mapM findConstructor ts
-      args <- concat <$> mapM compileBranch pats
-      let interp_adt = TH.mkName ("interp__adtDist__" ++
-                                  TH.nameBase (tn_th_name info))
-      let dist = applyTHExpInterp (TH.VarE interp_adt) args
-      embedM [| (\ v -> interp__'sample $(return dist) v interp__'return) |]
-
--- * Compiling interpreted patterns
-
--- Function arguments at this point are only ever going to be
--- variables, so we can ignore all other patterns here
-compileFunctionArgInterp :: Pattern Rewritten -> Compile TH.Pat
-compileFunctionArgInterp (CompiledBasicPattern pat) =
-  return $ compileVarPat pat
-compileFunctionArgInterp pat =
-  fail ("Unexpected top-level pattern: " ++ show pat)
-
-compileVarPat :: CompiledVarPattern Rewritten -> TH.Pat
-compileVarPat (VarCPat x _) = TH.VarP $ TH.mkName $ T.unpack x
-compileVarPat (WildCPat _) = TH.WildP
-
-compileVarPatExp :: CompiledVarPattern Rewritten -> TH.Exp
-compileVarPatExp (VarCPat x _) = TH.VarE $ TH.mkName $ T.unpack x
-compileVarPatExp (WildCPat _) = error "unexpected wildcard"
-
--- V-expression patterns are pretty straightforward, but sometimes
--- we'll need to unwrap the outer ADT tuple layer and sometimes we
--- won't---hence the bool, which is True if we need a tuple
--- projection.
-compileVExprPatternInterp :: Pattern Rewritten -> Compile (TH.Exp -> TH.Exp)
-compileVExprPatternInterp patt = withCompileCtx patt $ go patt where
-  go (CompiledBasicPattern pat) = do
-    pat' <- go' pat
-    return $ TH.LamE [pat']
-  go (CompiledCtorPat _ _ _) = do
-    fail "Unsure of how to compile constructors in this context"
-  go (CompiledTuplePat patts _) = do
-    tup <- embedM (TH.newName "tup")
-    patts_th <- mkTupleBodyTHPat <$> mapM go' patts
-    return $ \ body ->
-      TH.LamE [TH.VarP tup] $
-        applyTHExp (TH.VarE 'interp__'vProjTuple)
-          [ TH.VarE tup, TH.LamE [patts_th] body]
-  go (CompiledLitPat (IntegerLit i) _) =
-    return $ TH.LamE [TH.LitP (TH.IntegerL i)]
-  go (CompiledLitPat (RationalLit r) _) =
-    return $ TH.LamE [TH.LitP (TH.RationalL r)]
-  go' (VarCPat x _) =
-    return $ TH.VarP $ TH.mkName $ ("v__" ++ T.unpack x)
-  go' (WildCPat _) = return TH.WildP
-
-instance Compilable (ModelCase Rewritten) TH.Clause where
-  compile (ModelCase patts sub_cases) = do
-    patts_th <- mapM compileFunctionArgInterp patts
-    sub_cases_th <- case sub_cases of
-      [] -> fail "Error: no subcases in model"
-      ModelSubCase (CompiledCtorPat (CtorInfo { ctor_type = typ }) _ _) _ _ : _ ->
-        case typ of
-          TopType _ _ _ (ADTType info _) ->
-            compileCtorCases info sub_cases
-          TopType _ _ _ t ->
-            fail ("Return type of constructor doesn't name an ADT:" ++ show t)
-      [ModelSubCase pat _ ss] -> withModelSubCasePattern pat $ do
-        pat_th <- compileVExprPatternInterp pat
-        body_th <- compile ss
-        return $ pat_th body_th
-      cs -> fail ("Unsure how to handle " ++ show cs)
-    body_th <-
-      embedM $ [| interp__'mkDist $(return sub_cases_th) |]
-    fun_th <- F.foldrM (\ pat expr ->
-                          embedM [| interp__'lam (\ $(return pat) -> $(return expr)) |])
-                body_th patts_th
-    return (TH.Clause [] (TH.NormalB fun_th) [])
-
-compileSubCases :: [ModelSubCase Rewritten] -> Compile TH.Exp
-compileSubCases sub_cases = fmap (TH.AppE (TH.VarE 'interp__'mkDist)) $ case sub_cases of
-  [] -> fail "Error: no subcases in model"
-  (ModelSubCase (CompiledCtorPat (CtorInfo { ctor_type = typ }) _ _) _ _ : _) ->
-        case typ of
-          TopType _ _ _ (ADTType info _) ->
-            compileCtorCases info sub_cases
-          TopType _ _ _ t ->
-            fail ("Return type of constructor doesn't name an ADT: " ++ show t)
-  [ModelSubCase pat _ ss] -> withModelSubCasePattern pat $ do
-        pat_th <- compileVExprPatternInterp pat
-        body_th <- compile ss
-        return $ pat_th body_th
-  cs -> fail ("Unsure how to handle " ++ show cs)
-
-mkInterpLam :: [CompiledVarPattern Rewritten] -> TH.Exp -> Compile TH.Exp
-mkInterpLam [] e = return e
-mkInterpLam (VarCPat i _:ps) e = do
-  let pat = TH.VarP (TH.mkName (T.unpack i))
-  expr_th <- mkInterpLam ps e
-  embedM [| interp__'lam (\ $(return pat) -> $(return expr_th)) |]
-mkInterpLam (WildCPat _:ps) e = do
-  let pat = TH.WildP
-  expr_th <- mkInterpLam ps e
-  embedM [| interp__'lam (\ $(return pat) -> $(return expr_th)) |]
-
-instance Compilable (Decl Rewritten) [TH.Dec] where
-  compile (ModelDecl {}) = do
-    error "we should compile all ModelDecls to FunDecls via pattern-matching conversion"
-
-  compile d@(FunDecl nm annot [FunCase pats expr]) =
+instance Compilable (Decl Typed) [TH.Dec] where
+  compile d@(FunDecl nm annot fun_cases) =
     withLocalCompileEnv $ withCompileCtx d $ withCurrentFunction nm $
     do let nm_th = TH.mkName $ T.unpack $ interpIdent nm
        tp_th <- compile annot
@@ -1067,8 +990,7 @@ instance Compilable (Decl Rewritten) [TH.Dec] where
                                         gname_type = annot,
                                         gname_fixity = TH.defaultFixity }
        Just fix_th <- compile_fix_parameter <$> get
-       expr_th <- compile expr
-       body_th <- mkInterpLam pats expr_th
+       body_th <- compileFunExp fun_cases
        let body_fix_th =
              TH.AppE (TH.VarE 'interp__'fix)
              (TH.LamE [TH.VarP fix_th] body_th)
@@ -1076,12 +998,9 @@ instance Compilable (Decl Rewritten) [TH.Dec] where
               , TH.FunD nm_th [TH.Clause [] (TH.NormalB body_fix_th) []]
               ]
 
-  compile (FunDecl {}) =
-    error "Function with more than one top-level case (we should rewrite these away)"
-
   compile (SourceDecl name _ src_exp) =
     do src_exp_th <- compile src_exp
-       return [ TH.ValD (TH.VarP $ TH.mkName $ T.unpack name)
+       return [ TH.ValD (TH.VarP $ compileIdent name)
                 (TH.NormalB src_exp_th) [] ]
 
   compile (MainDecl (GPriorStmt src_expr model_expr)
@@ -1106,8 +1025,7 @@ compileGPostInterp str = runCompile $ do
   resolved_e <- embedM $ resolve parsed_e
   let fixed_e = fixupOps resolved_e
   checked_e <- embedM $ typeCheck fixed_e ()
-  rewritten <- embedM $ rewriteMatches checked_e
-  compile rewritten
+  compile checked_e
 
 gpost :: TH.QuasiQuoter
 gpost = TH.QuasiQuoter
@@ -1130,8 +1048,7 @@ compileGrappa str =
        do resolved_d <- embedM $ resolve parsed_d
           let fixed_d = fixupOps resolved_d
           checked_d <- embedM $ typeCheck fixed_d ()
-          rewritten <- embedM $ rewriteMatches checked_d
-          compile rewritten
+          compile checked_d
 
 grappa :: TH.QuasiQuoter
 grappa =

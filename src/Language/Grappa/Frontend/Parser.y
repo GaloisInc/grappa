@@ -84,7 +84,7 @@ decls :: { [Decl Raw] }
   : list1(decl) { $1 }
 
 decl :: { Decl Raw }
-  : 'model' 'i{' sep1(model_case, 'i;') 'i}' { combine_model_cases Nothing $3 }
+  : 'model' 'i{' sep1(model_case, 'i;') 'i}' { combine_fun_cases Nothing $3 }
   | 'fun' 'i{' sep1(fun_case,'i;') 'i}' { combine_fun_cases Nothing $3 }
   | 'source' IDENT '::' typ '=' 'i{' source_exp 'i}' { SourceDecl (fst $2) $4 $7 }
   | 'main' '=' 'i{' maindecl 'i}' { $4 }
@@ -98,15 +98,15 @@ method :: { InfMethod Raw }
 gprior :: { GPriorStmt Raw }
   : source_exp '~' exp { GPriorStmt $1 $3 }
 
-model_case :: { (Ident, ModelCase Raw) }
+model_case :: { (Ident, FunCase Raw) }
   : IDENT list(arg_pattern) list1(model_subcase)
-    { (fst $1, ModelCase $2 $3) }
+    { (fst $1, FunCase $2 (ModelExp $3 ())) }
 
-model_subcase :: { ModelSubCase Raw }
+model_subcase :: { ModelCase Raw }
   : '{' sep(vpattern,',') '}' '=' 'i{' stmt_block
-    { ModelSubCase (patt_parens $2) Nothing $6 }
+    { ModelCase (patt_parens $2) (LiteralExp (IntegerLit 1) ()) $6 }
   | '{' sep(vpattern,',') '|' exp '}' '=' 'i{' stmt_block
-    { ModelSubCase (patt_parens $2) (Just $4) $8 }
+    { ModelCase (patt_parens $2) $4 $8 }
 
 fun_case :: { (Ident, FunCase Raw) }
   : IDENT list(arg_pattern) '=' 'i{' exp 'i}' { (fst $1, FunCase $2 $5) }
@@ -328,16 +328,6 @@ parseDecls start str = decls (lexLayout start str)
 
 parseGPrior :: SourcePos -> String -> Parse (GPriorStmt Raw)
 parseGPrior start str = gprior (lexLayout start str)
-
--- | Check that all 'ModelCase's in a list use the same identifier, and then
--- combine them into a single 'ModelDecl'
-combine_model_cases :: Maybe (TopTypeP RawType) ->
-                       [(Ident, ModelCase Raw)] -> Decl Raw
-combine_model_cases annot cases =
-  let ident = fst (head cases) in
-  if all ((==) ident . fst) cases then
-    ModelDecl ident annot (map snd cases)
-  else error ("Incorrect head symbol in case for " ++ show ident)
 
 -- | Check that all 'FunCase's in a list use the same identifier, and then
 -- combine them into a single 'FunDecl'
