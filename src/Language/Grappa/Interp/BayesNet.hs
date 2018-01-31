@@ -846,6 +846,12 @@ instance Interp__'ifThenElse BNExprRepr where
     GExpr $ BNExprDynamic $
     interp__'ifThenElse b (bnExprToDyn t) (bnExprToDyn e)
 
+instance Interp__'vmatchSwitch BNExprRepr where
+  interp__'vmatchSwitch (GExpr (BNExprInt i)) stmts = stmts !! i
+  interp__'vmatchSwitch (GExpr (BNExprDynamic _)) _ =
+    error ("Bayesian networks do not support models where "
+           ++ "multiple cases match the input")
+
 instance Interp__not BNExprRepr where
   interp__not = mkBnFunExpr1 not interp__not
 

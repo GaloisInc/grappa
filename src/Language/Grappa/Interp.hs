@@ -248,6 +248,12 @@ newtype GVMatchOne repr a =
   GVMatchOne { unGVMatchOne ::
                  (Maybe (GStmt repr a) -> GStmt repr a) -> GStmt repr a }
 
+-- | Class for interpreting a form of @switch@ statement over 'Int' expressions,
+-- which returns the @i@th expression for 'Int' @i@, that is used in @model@
+-- expressions that must choose between multiple alternatives
+class ValidRepr repr => Interp__'vmatchSwitch repr where
+  interp__'vmatchSwitch :: GExpr repr Int -> [GStmt repr a] -> GStmt repr a
+
 -- | Build a pattern-matching statement from a @case@ statement body with only
 -- one alternative
 interp__'vmatch1 :: GVMatchOne repr a -> GStmt repr a
@@ -256,13 +262,13 @@ interp__'vmatch1 (GVMatchOne m) = m helper where
   helper Nothing = error "Model case did not match input!"
 
 -- | Collect the requirements for 'interp__'vmatch' into a single typeclass
-class (Interp__categorical repr, Interp__'intSwitch repr,
+class (Interp__categorical repr, Interp__'vmatchSwitch repr,
        Interp__'integer repr Prob, Interp__'integer repr Int,
        Interp__'plus repr Prob, Interp__'div repr Prob,
        Interp__ADT__Expr repr (ListF Prob)) =>
       Interp__'vmatch repr where
 
-instance (Interp__categorical repr, Interp__'intSwitch repr,
+instance (Interp__categorical repr, Interp__'vmatchSwitch repr,
           Interp__'integer repr Prob, Interp__'integer repr Int,
           Interp__'plus repr Prob, Interp__'div repr Prob,
           Interp__ADT__Expr repr (ListF Prob)) =>
@@ -294,8 +300,12 @@ interp__'vmatch (GVMatch m) = m helper where
     interp__'vlift (interp__'integer 0) $ \vexp_0 ->
     interp__'vwild $ \vexp_wild ->
     interp__'sample (expr_categorical [yes_norm, no_norm]) vexp_0 $ \_ ->
-    interp__'sample (expr_categorical yes_ps) vexp_wild $ \branch_num ->
-    interp__'intSwitch branch_num branches
+    case branches of
+      [] -> error "No cases match in model expression!"
+      [branch] -> branch
+      _ ->
+        interp__'sample (expr_categorical yes_ps) vexp_wild $ \branch_num ->
+        interp__'vmatchSwitch branch_num branches
 
   get_split_ps :: [(a, Maybe b)] -> ([a], [a])
   get_split_ps =
@@ -388,11 +398,6 @@ class ValidExprRepr repr => Interp__'ifThenElse repr where
 class ValidRepr repr => Interp__'ifThenElseStmt repr where
   interp__'ifThenElseStmt :: GExpr repr Bool -> GStmt repr a -> GStmt repr a ->
                              GStmt repr a
-
--- | Class for interpreting a form of @switch@ statement over 'Int' expressions,
--- which returns the @i@th expression for 'Int' @i@
-class ValidRepr repr => Interp__'intSwitch repr where
-  interp__'intSwitch :: GExpr repr Int -> [GStmt repr a] -> GStmt repr a
 
 class (ValidExprRepr repr) => Interp__not repr where
   interp__not :: GExpr repr (Bool -> Bool)

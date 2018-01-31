@@ -188,6 +188,9 @@ instance EmbedRepr (StandardHORepr m r i) Bool where
 instance Interp__'ifThenElse (StandardHORepr m r i) where
   interp__'ifThenElse (GExpr c) t e = if c then t else e
 
+instance Monad m => Interp__'vmatchSwitch (StandardHORepr m r Int) where
+  interp__'vmatchSwitch (GExpr i) stmts = stmts !! i
+
 instance Interp__not (StandardHORepr m r i) where
   interp__not = GExpr not
 
