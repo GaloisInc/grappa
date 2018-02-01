@@ -22,7 +22,6 @@ import qualified Data.Vector as V
 import qualified System.Random.MWC as MWC
 import qualified System.Random.MWC.Distributions as MWC
 
-import Language.Grappa.Distribution
 import Language.Grappa.Interp
 import Language.Grappa.GrappaInternals
 import Language.Grappa.Rand.MWCRandM

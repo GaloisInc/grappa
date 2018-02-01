@@ -449,12 +449,12 @@ ingestADTName :: TH.Name -> Ingest TypeNameInfo
 ingestADTName nm =
   thReify nm >>= \th_info ->
   case th_info of
-    TH.TyConI (THCompat.DataD _ _ tyvars th_ctors _) ->
+    TH.TyConI (THCompat.DataD _ _ tyvars th_ctors) ->
       do ctors <- mapM (ingestADTCtor tyvars) th_ctors
          return $ TypeNameInfo { tn_th_name = nm,
                                  tn_arity = length tyvars - 2,
                                  tn_ctors = Just ctors }
-    TH.TyConI (THCompat.NewtypeD _ _ tyvars th_ctor _) ->
+    TH.TyConI (THCompat.NewtypeD _ _ tyvars th_ctor) ->
       do ctor <- ingestADTCtor tyvars th_ctor
          return $ TypeNameInfo { tn_th_name = nm,
                                  tn_arity = length tyvars - 2,
@@ -493,13 +493,13 @@ ingestBaseTypeName :: TH.Name -> Ingest (TypeNameInfo, [BaseCtor])
 ingestBaseTypeName nm = do
   th_info <- thReify nm
   case th_info of
-    TH.TyConI (THCompat.DataD ctx _ tyvars th_ctors _) ->
+    TH.TyConI (THCompat.DataD ctx _ tyvars th_ctors) ->
       do ctors <- mapM (ingestBaseCtor nm tyvars ctx) th_ctors
          return (TypeNameInfo { tn_th_name = nm,
                                 tn_arity = length tyvars,
                                 tn_ctors = Nothing },
                  ctors)
-    TH.TyConI (THCompat.NewtypeD ctx _ tyvars th_ctor _) ->
+    TH.TyConI (THCompat.NewtypeD ctx _ tyvars th_ctor) ->
       do ctor <- ingestBaseCtor nm tyvars ctx th_ctor
          return (TypeNameInfo { tn_th_name = nm,
                                 tn_arity = length tyvars,

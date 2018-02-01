@@ -43,8 +43,14 @@ outputPath config = takeDirectory (outputFile config)
 -- * Creating Haskell Source Files
 --
 
-hsHeader :: String
-hsHeader = unlines
+-- | Escape the 'inputFile' of a 'GrappaConfig'
+escapeInputFile :: GrappaConfig -> String
+escapeInputFile config =
+  concatMap (\c -> if c == '"' then ['\\', '"'] else [c]) $
+  inputFile config
+
+hsHeader :: GrappaConfig -> String
+hsHeader config = unlines
   [ "{-# LANGUAGE TemplateHaskell #-}"
   , "{-# LANGUAGE QuasiQuotes #-}"
   , "{-# LANGUAGE ViewPatterns #-}"
@@ -56,14 +62,14 @@ hsHeader = unlines
   , "{-# LANGUAGE TypeFamilies #-}"
   , "{-# OPTIONS_GHC -Wno-all #-}"
   , "module Main where"
-  , "import Language.Grappa.Frontend.Compile(grappa)"
+  , "import Language.Grappa.Frontend.Compile(compileGrappa,gtext)"
   , "import Language.Grappa.Interp"
   , "import Language.Grappa.GrappaInternals"
-  , "[grappa|"
+  , "$(compileGrappa \"" ++ escapeInputFile config ++ "\" [gtext|"
   ]
 
 hsFooter :: String
-hsFooter = "\n|]\n"
+hsFooter = "\n|])\n"
 
 cabalFileText :: GrappaConfig -> String
 cabalFileText config = unlines
@@ -94,10 +100,9 @@ stackFileText config =
   ([ "packages:"
    , "- '.'" ] ++
    local_pkgs ++
-   [ "resolver: lts-8.8"
+   [ "resolver: lts-10.4"
    , "extra-deps:"
-   , "- alex-tools-0.1.1.0"
-   , "- pcg-random-0.1.3.4"
+   , "- alex-tools-0.3"
    , "- microtimer-0.0.1.2"
    , "- layout-rules-0.1.0.1"
    ]
@@ -128,11 +133,11 @@ defaultProjectPath name = basePath </> "." ++ fileName ++ "-project"
 defaultConfig :: String -> IO GrappaConfig
 defaultConfig name =
   do grappaLib <- lookupEnv "GRAPPA_LIB"
-     outputFile <- makeAbsolute (defaultOutputBinary name)
+     outFile <- makeAbsolute (defaultOutputBinary name)
      return $
        GrappaConfig { inputFile = name,
                       projectPath = defaultProjectPath name,
-                      outputFile = outputFile,
+                      outputFile = outFile,
                       grappaLibPath = grappaLib }
 
 -- | Process a command-line option as a modification of a configuration
@@ -162,7 +167,7 @@ main = do
   config <- processSysArgs
   createDirectoryIfMissing False (projectPath config)
   hsSource <- readFile (inputFile config)
-  writeFile (sourceFile config) (hsHeader ++ hsSource ++ hsFooter)
+  writeFile (sourceFile config) (hsHeader config ++ hsSource ++ hsFooter)
   writeFile (cabalFile config) (cabalFileText config)
   writeFile (stackFile config) (stackFileText config)
 

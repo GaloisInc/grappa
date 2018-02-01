@@ -174,7 +174,7 @@ data Error = E_lexical !SourcePos
 lexer :: SourcePos -> String -> [Lexeme Token]
 lexer start str = $makeLexer simpleLexer input
   where
-  input = (initialInput (T.pack str)) { inputPos = start }
+  input = (initialInput (sourceFile start) (T.pack str)) { inputPos = start }
 
 alexGetByte = makeAlexGetByte $ \ c ->
   if isAscii c

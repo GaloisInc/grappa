@@ -1019,9 +1019,9 @@ instance Compilable (Decl Typed) [TH.Dec] where
 -- * Quasi-quoter for posterior expressions
 --
 
-compileGPostInterp :: String -> TH.Q TH.Exp
-compileGPostInterp str = runCompile $ do
-  parsed_e <- embedM $ parseGPrior startPos str
+compileGPostInterp :: String -> String -> TH.Q TH.Exp
+compileGPostInterp filename str = runCompile $ do
+  parsed_e <- embedM $ parseGPrior (startPos $ T.pack filename) str
   resolved_e <- embedM $ resolve parsed_e
   let fixed_e = fixupOps resolved_e
   checked_e <- embedM $ typeCheck fixed_e ()
@@ -1029,7 +1029,7 @@ compileGPostInterp str = runCompile $ do
 
 gpost :: TH.QuasiQuoter
 gpost = TH.QuasiQuoter
-  { TH.quoteExp  = compileGPostInterp
+  { TH.quoteExp  = compileGPostInterp "quasi-quotation"
   , TH.quotePat  = const (error "No gprior quasi-quoter for patterns")
   , TH.quoteType = const (error "No gprior quasi-quoter for types")
   , TH.quoteDec  = const (error "No top-level gprior quasi-quoter")
@@ -1040,10 +1040,10 @@ gpost = TH.QuasiQuoter
 -- * Top-level Compiler
 --
 
-compileGrappa :: String -> TH.Q [TH.Dec]
-compileGrappa str =
+compileGrappa :: String -> String -> TH.Q [TH.Dec]
+compileGrappa filename str =
   runCompile $
-  do parsed_ds <- embedM $ parseDecls startPos str
+  do parsed_ds <- embedM $ parseDecls (startPos $ T.pack filename) str
      liftM concat $ forM parsed_ds $ \parsed_d ->
        do resolved_d <- embedM $ resolve parsed_d
           let fixed_d = fixupOps resolved_d
@@ -1056,4 +1056,13 @@ grappa =
   { TH.quoteExp = \_ -> error "No Grappa quasi-quoter for expressions",
     TH.quotePat = \_ -> error "No Grappa quasi-quoter for patterns",
     TH.quoteType = \_ -> error "No Grappa quasi-quoter for types",
-    TH.quoteDec = compileGrappa }
+    TH.quoteDec = compileGrappa "quasi-quotation" }
+
+-- | A quasi-quoter for the contents of a Grappa file
+gtext :: TH.QuasiQuoter
+gtext =
+  TH.QuasiQuoter
+  { TH.quoteExp = TH.litE . TH.StringL,
+    TH.quotePat = \_ -> error "No gtext quasi-quoter for patterns",
+    TH.quoteType = \_ -> error "No gtext quasi-quoter for types",
+    TH.quoteDec = \_ -> error "No gtext quasi-quoter for declarations" }

@@ -26,25 +26,26 @@ fmapType fNm fTy fK ty_ = case ty_ of
   ty -> ty
 
 #if MIN_VERSION_template_haskell(2,11,0)
-pattern DataD :: TH.Cxt -> Name -> [TH.TyVarBndr] -> [TH.Con] -> TH.Cxt -> TH.Dec
-pattern DataD    ctx nm tyvars cons ctx' <- TH.DataD    ctx nm tyvars _ cons ctx'
+pattern DataD :: TH.Cxt -> Name -> [TH.TyVarBndr] -> [TH.Con] -> TH.Dec
+pattern DataD    ctx nm tyvars cons <- TH.DataD    ctx nm tyvars _ cons _
 
-pattern NewtypeD :: TH.Cxt -> Name -> [TH.TyVarBndr] -> TH.Con -> TH.Cxt -> TH.Dec
-pattern NewtypeD ctx nm tyvars con  ctx' <- TH.NewtypeD ctx nm tyvars _ con  ctx'
+pattern NewtypeD :: TH.Cxt -> Name -> [TH.TyVarBndr] -> TH.Con -> TH.Dec
+pattern NewtypeD ctx nm tyvars con <- TH.NewtypeD ctx nm tyvars _ con _
+
 #else
-pattern DataD    ctx nm tyvars cons ctx' <- TH.DataD    ctx nm tyvars   cons ctx'
-pattern NewtypeD ctx nm tyvars con  ctx' <- TH.NewtypeD ctx nm tyvars   con  ctx'
+pattern DataD    ctx nm tyvars cons <- TH.DataD    ctx nm tyvars   cons _
+pattern NewtypeD ctx nm tyvars con <- TH.NewtypeD ctx nm tyvars   con _
 #endif
 
 #if MIN_VERSION_template_haskell(2,11,0)
-dataD :: TH.Cxt -> Name -> [TH.TyVarBndr] -> [TH.Con] -> TH.Cxt -> TH.Dec
-dataD    ctx nm tyvars cons ctx' = TH.DataD    ctx nm tyvars Nothing cons ctx'
+dataD :: TH.Cxt -> Name -> [TH.TyVarBndr] -> [TH.Con] -> TH.Dec
+dataD    ctx nm tyvars cons = TH.DataD    ctx nm tyvars Nothing cons []
 
-newtypeD :: TH.Cxt -> Name -> [TH.TyVarBndr] -> TH.Con -> TH.Cxt -> TH.Dec
-newtypeD ctx nm tyvars con  ctx' = TH.NewtypeD ctx nm tyvars Nothing con  ctx'
+newtypeD :: TH.Cxt -> Name -> [TH.TyVarBndr] -> TH.Con -> TH.Dec
+newtypeD ctx nm tyvars con = TH.NewtypeD ctx nm tyvars Nothing con []
 #else
-dataD    ctx nm tyvars cons ctx' = TH.DataD    ctx nm tyvars         cons ctx'
-newtypeD ctx nm tyvars con  ctx' = TH.NewtypeD ctx nm tyvars         con  ctx'
+dataD    ctx nm tyvars cons = TH.DataD    ctx nm tyvars cons []
+newtypeD ctx nm tyvars con = TH.NewtypeD ctx nm tyvars con []
 #endif
 
 #if MIN_VERSION_template_haskell(2,11,0)
