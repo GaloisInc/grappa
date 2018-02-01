@@ -171,8 +171,8 @@ instance FixupOps Pattern where
   fixupOps (SigPat patt tp) = SigPat (fixupOps patt) tp
 
 instance FixupOps ModelCase where
-  fixupOps (ModelCase patt exp body) =
-    ModelCase (fixupOps patt) (fixupOps exp) (fixupOps body)
+  fixupOps (ModelCase patt e body) =
+    ModelCase (fixupOps patt) (fixupOps e) (fixupOps body)
 
 instance FixupOps FunCase where
   fixupOps (FunCase patts body) = FunCase (map fixupOps patts) (fixupOps body)
