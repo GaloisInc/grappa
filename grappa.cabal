@@ -27,6 +27,7 @@ flag show-splices
   description: Show the generated Haskell code from Grappa splices
   default: True
 
+
 executable grappa
   default-language: Haskell2010
   hs-source-dirs: grappa
@@ -43,6 +44,19 @@ executable grappa-c
   main-is: Main.hs
   ghc-options: -O2 -threaded -Wall
   build-depends: base
+               , filepath
+               , directory
+               , process
+
+executable grappa-build
+  default-language: Haskell2010
+  hs-source-dirs: grappa-build
+
+  main-is: Main.hs
+  ghc-options: -O2 -threaded -Wall
+
+  build-depends: base
+               , grappa
                , filepath
                , directory
                , process

@@ -1,7 +1,9 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
+import Control.Monad (void)
 import System.Directory
 import System.Environment
 import System.FilePath
@@ -29,8 +31,8 @@ data GrappaConfig =
 cabalFile :: GrappaConfig -> String
 cabalFile config = projectPath config </> "grappa-main.cabal"
 
-sourceFile :: GrappaConfig -> String
-sourceFile config = projectPath config </> "Main.hs"
+mainFile :: GrappaConfig -> String
+mainFile config = projectPath config </> "Main.hs"
 
 stackFile :: GrappaConfig -> String
 stackFile config = projectPath config </> "stack.yaml"
@@ -131,14 +133,11 @@ defaultProjectPath name = basePath </> "." ++ fileName ++ "-project"
 
 -- | Build a default configuration from an input Grappa filename
 defaultConfig :: String -> IO GrappaConfig
-defaultConfig name =
-  do grappaLib <- lookupEnv "GRAPPA_LIB"
-     outFile <- makeAbsolute (defaultOutputBinary name)
-     return $
-       GrappaConfig { inputFile = name,
-                      projectPath = defaultProjectPath name,
-                      outputFile = outFile,
-                      grappaLibPath = grappaLib }
+defaultConfig inputFile =
+  do grappaLibPath <- lookupEnv "GRAPPA_LIB"
+     outputFile <- makeAbsolute (defaultOutputBinary inputFile)
+     projectPath <- makeAbsolute (defaultProjectPath inputFile)
+     return $ GrappaConfig { .. }
 
 -- | Process a command-line option as a modification of a configuration
 processOption :: GrappaConfig -> GrappaOption -> GrappaConfig
@@ -166,14 +165,24 @@ main :: IO ()
 main = do
   config <- processSysArgs
   createDirectoryIfMissing False (projectPath config)
-  hsSource <- readFile (inputFile config)
-  writeFile (sourceFile config) (hsHeader config ++ hsSource ++ hsFooter)
-  writeFile (cabalFile config) (cabalFileText config)
-  writeFile (stackFile config) (stackFileText config)
+  grappaSource <- readFile (inputFile config)
+  let mainContents = hsHeader config ++ grappaSource ++ hsFooter
+  case grappaLibPath config of
+    Just glibPath ->
+      do let altMainFile = glibPath </> "grappa-build" </> "Main.hs"
+         writeFile altMainFile mainContents
+         let p =
+               (proc "stack" ["install", "grappa:grappa-build",
+                              "--local-bin-path", projectPath config])
+               { cwd = Just glibPath }
+         void $ readCreateProcess p ""
+         copyFile (projectPath config </> "grappa-build") (outputFile config)
 
-  let p =
-        (proc "stack" ["install", "--local-bin-path", outputPath config])
-        { cwd = Just (projectPath config) }
-  _ <- readCreateProcess p ""
-
-  return ()
+    Nothing ->
+      do writeFile (mainFile config) mainContents
+         writeFile (cabalFile config) (cabalFileText config)
+         writeFile (stackFile config) (stackFileText config)
+         let p =
+               (proc "stack" ["install", "--local-bin-path", outputPath config])
+               { cwd = Just (projectPath config) }
+         void $ readCreateProcess p ""
