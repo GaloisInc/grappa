@@ -97,6 +97,7 @@ library
                      , Language.Grappa.Interp.MonoidRepr
                      , Language.Grappa.Interp.ProductRepr
                      , Language.Grappa.Interp.FunRepr
+                     , Language.Grappa.Interp.TypedExpr
 
                      -- Inference methods
                      , Language.Grappa.Inference
@@ -124,6 +125,7 @@ library
                      -- misc. utility modules
                      -- , Control.Monad.Concurrent
                      -- , Data.Tsil
+                     , Language.Haskell.TH.GrappaUtil
   other-modules:       Language.Haskell.TH.Compat
   build-tools:         alex, happy
 
