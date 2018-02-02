@@ -49,6 +49,13 @@ data TypedExpr a where
   TypedFix :: (TH.Name -> TypedExpr a) -> TypedExpr a
   -- ^ Fixed-point expression
 
+  TypedTuple :: TupleF ts TypedExpr (GTuple ts) -> TypedExpr (GTuple ts)
+  -- ^ Tuple expression
+  TypedMatchTuple :: IsTypeList ts => TypedExpr (GTuple ts) ->
+                     (TupleF ts (Const TH.Name) (GTuple ts) -> TypedExpr a) ->
+                     TypedExpr a
+  -- ^ Tuple pattern-matching expression
+
   TypedCtor :: THADT adt => adt TypedExpr (ADT adt) -> TypedExpr (ADT adt)
   -- ^ Constructor application expression
   TypedMatchCtor :: THADT adt => TypedExpr (ADT adt) ->
@@ -78,10 +85,18 @@ compileToTH (TypedFix f) =
   do x <- TH.newName "fix_var"
      TH.letE [TH.valD (TH.varP x) (TH.normalB $ compileToTH $ f x) []]
        (TH.varE x)
+compileToTH (TypedTuple tup) =
+  adtToTHExp <$> traverseADT (fmap Const . compileToTH) tup
+compileToTH (TypedMatchTuple e k) =
+  do ns_tup <-
+       traverseADT (const (Const <$> TH.newName "tup_arg")) (buildTuple Proxy)
+     TH.caseE (compileToTH e)
+       [TH.match (return $ adtToTHPattern ns_tup)
+        (TH.normalB $ compileToTH $ k ns_tup) []]
 compileToTH (TypedCtor adt) =
   adtToTHExp <$> traverseADT (fmap Const . compileToTH) adt
 compileToTH (TypedMatchCtor e ctor k_succ k_fail) =
-  do ns_adt <- traverseADT (const (Const <$> TH.newName "ctor_arg")) ctor
+  do ns_adt <- traverseADT (const (Const <$> TH.newName "case_arg")) ctor
      TH.caseE (compileToTH e)
        [TH.match (return $ adtToTHPattern ns_adt)
         (TH.normalB $ compileToTH $ k_succ $ ns_adt) []
@@ -98,11 +113,10 @@ data TypedExprRepr :: *
 instance ValidExprRepr TypedExprRepr where
   type GExprRepr TypedExprRepr a = TypedExpr a
   interp__'bottom = error "TypedExprRepr: unexpected bottom!"
-  interp__'injTuple tup = GExpr $ TypedCtor $ mapADT unGExpr tup
+  interp__'injTuple tup = GExpr $ TypedTuple $ mapADT unGExpr tup
   interp__'projTuple (GExpr e) k =
-    GExpr $ TypedMatchCtor e (buildTuple Proxy)
-    (unGExpr . k . mapADT (GExpr . TypedVar . getConst)) $
-    error "TypedExprRepr: unexpected tuple match failure"
+    GExpr $ TypedMatchTuple e
+    (unGExpr . k . mapADT (GExpr . TypedVar . getConst))
   interp__'app (GExpr f) (GExpr x) =
     GExpr (TypedApp f x)
   interp__'lam f = GExpr $ TypedLam (unGExpr . f . GExpr . TypedVar)
