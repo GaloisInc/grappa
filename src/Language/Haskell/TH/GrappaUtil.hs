@@ -162,15 +162,22 @@ class TraversableADT adt => THADT adt where
   -- | Get the TH name for the constructor of an adt object
   adtHeadCtorName :: adt f r -> TH.Name
 
+-- | Typed wrapper around a TH name
+newtype THName a = THName { getTHName :: TH.Name }
+
+-- | Create a fresh 'THName'
+newTHName :: String -> TH.Q (THName a)
+newTHName str = THName <$> TH.newName str
+
 -- | Convert a constructor application to TH exprs into a TH expression
 adtToTHExp :: THADT adt => adt (Const TH.Exp) (ADT adt) -> TH.Exp
 adtToTHExp adt =
   applyTHExp (TH.ConE $ adtHeadCtorName adt) (ctorArgsADT getConst adt)
 
 -- | Convert a constructor application to TH names into a TH pattern
-adtToTHPattern :: THADT adt => adt (Const TH.Name) (ADT adt) -> TH.Pat
+adtToTHPattern :: THADT adt => adt THName (ADT adt) -> TH.Pat
 adtToTHPattern adt =
-  TH.ConP (adtHeadCtorName adt) (ctorArgsADT (TH.VarP . getConst) adt)
+  TH.ConP (adtHeadCtorName adt) (ctorArgsADT (TH.VarP . getTHName) adt)
 
 instance THADT (TupleF ts) where
   adtHeadCtorName Tuple0 = 'Tuple0
