@@ -192,9 +192,9 @@ mapADT f = unId . traverseADT (Id . f)
 -- | Fold a function over all the constructor arguments of an ADT. Note that
 -- this is /not/ the same as, say, a list fold, since here the "rest" argument
 -- in a list is treated as a single argument, i.e., we do not recurse.
-foldADT :: TraversableADT adt =>
-           (forall a. f a -> r) -> (r -> r -> r) -> r -> adt f (ADT adt) -> r
-foldADT resF f x = foldr f x . ctorArgsADT resF
+foldrADT :: TraversableADT adt =>
+            (forall a. f a -> r) -> (r -> r -> r) -> r -> adt f (ADT adt) -> r
+foldrADT resF f x = foldr f x . ctorArgsADT resF
 
 -- | A function that can test if a given ADT uses a specific constructor
 newtype CtorMatcher adt =

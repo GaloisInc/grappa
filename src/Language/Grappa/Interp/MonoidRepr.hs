@@ -25,7 +25,7 @@ data MonoidRepr w
 instance (Monoid w, Eq w) => ValidExprRepr (MonoidRepr w) where
   type GExprRepr (MonoidRepr w) a = w
   interp__'bottom = GExpr mempty
-  interp__'injTuple tup = GExpr $ foldADT unGExpr mappend mempty tup
+  interp__'injTuple tup = GExpr $ foldrADT unGExpr mappend mempty tup
   interp__'projTuple (GExpr w) projF =
     projF (mapADT (const $ GExpr w) typeListProxy)
   interp__'app (GExpr w1) (GExpr w2) = GExpr $ mappend w1 w2
@@ -44,7 +44,7 @@ instance (Monoid w, Eq w) => StrongTupleRepr (MonoidRepr w) where
 instance (Monoid w, Eq w, TraversableADT adt, ReifyCtorsADT adt) =>
          Interp__ADT__Expr (MonoidRepr w) adt where
   interp__'injADT adt =
-    GExpr $ foldADT unGExpr mappend mempty adt
+    GExpr $ foldrADT unGExpr mappend mempty adt
   interp__'projADT (GExpr w1) projF =
     GExpr $ mconcat $ map (unGExpr . projF . mapADT (\_ -> GExpr w1)) $
     reifyCtorsADT
