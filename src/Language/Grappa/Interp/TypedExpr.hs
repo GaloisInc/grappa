@@ -13,11 +13,14 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Language.Grappa.Interp.TypedExpr where
 
 import Data.Proxy
 import Data.Functor.Const
+import GHC.Generics
 
 import qualified Language.Haskell.TH as TH
 
@@ -76,9 +79,35 @@ data TypedExpr a where
 -- * Compiling Typed Expressions to TH
 ----------------------------------------------------------------------
 
--- | Typeclass for things that can be compiled via TH
+class GTHCompilable f where
+  gthCompile :: f a -> TH.Q TH.Exp
+
+instance GTHCompilable U1 where
+  gthCompile U1 = [| U1 |]
+
+instance (GTHCompilable a, GTHCompilable b) => GTHCompilable (a :*: b) where
+  gthCompile (a :*: b) = [| $(gthCompile a) :*: $(gthCompile b) |]
+
+instance (GTHCompilable a, GTHCompilable b) => GTHCompilable (a :+: b) where
+  gthCompile (L1 a) = [| L1 $(gthCompile a) |]
+  gthCompile (R1 b) = [| R1 $(gthCompile b) |]
+
+instance GTHCompilable a => GTHCompilable (M1 i c a) where
+  gthCompile (M1 a) = [| M1 $(gthCompile a) |]
+
+instance THCompilable a => GTHCompilable (K1 i a) where
+  gthCompile (K1 a) = [| M1 $(thCompile a) |]
+
+-- | A general typeclass for compiling things via TH
 class THCompilable a where
   thCompile :: a -> TH.Q TH.Exp
+
+  default thCompile :: (Generic a, GTHCompilable (Rep a)) => a -> TH.Q TH.Exp
+  thCompile a = [| to $(gthCompile (from a)) |]
+
+
+instance THCompilable a => THCompilable [a] where
+  thCompile l = TH.ListE <$> mapM thCompile l
 
 instance THCompilable (TypedExpr a) where
   thCompile (TypedVar nm) = TH.varE $ getTHName nm
