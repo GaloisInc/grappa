@@ -61,6 +61,15 @@ executable grappa-build
                , directory
                , process
 
+executable c-printer-test
+  hs-source-dirs: c-printer-test
+  main-is: Main.hs
+  build-depends: base
+               , grappa
+               , filepath
+               , directory
+               , log-domain >= 0.11
+
 library
   exposed-modules:     Language.Grappa
 
@@ -98,6 +107,7 @@ library
                      , Language.Grappa.Interp.ProductRepr
                      , Language.Grappa.Interp.FunRepr
                      , Language.Grappa.Interp.TypedExpr
+                     , Language.Grappa.Interp.CExpr
 
                      -- Inference methods
                      , Language.Grappa.Inference
@@ -112,6 +122,7 @@ library
                      -- , Language.Grappa.Inference.SMC
                      -- , Language.Grappa.Inference.Reparameterize
                      , Language.Grappa.Inference.BayesNetInference
+                     , Language.Grappa.Inference.CPrinter
 
                      -- Examples
                      -- , Language.Grappa.Examples
