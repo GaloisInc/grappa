@@ -15,9 +15,9 @@ uniformDist var lo hi =
    (BinaryExpr
     AndOp
     -- lo <= var
-    (BinaryExpr LTEOp lo (VarExpr DoubleType var))
+    (BinaryExpr LTEOp lo (VarExpr var))
     -- var <= hi
-    (BinaryExpr LTEOp (VarExpr DoubleType var) hi)
+    (BinaryExpr LTEOp (VarExpr var) hi)
    )
    -- Then return log (1 / (hi - lo))
    (log (1 / (hi - lo)))
@@ -31,21 +31,21 @@ normalDist :: VarName -> VarName -> AtomicDist
 normalDist var mu =
   DoubleDist
   (Log.ln $
-   normalDensityUnchecked (VarExpr DoubleType mu) 1 (VarExpr DoubleType var))
-  [(var, VarExpr DoubleType mu - VarExpr DoubleType var),
-   (mu, (VarExpr DoubleType var - VarExpr DoubleType mu))]
+   normalDensityUnchecked (VarExpr mu) 1 (VarExpr var))
+  [(var, VarExpr mu - VarExpr var),
+   (mu, (VarExpr var - VarExpr mu))]
 
 testDPMix :: DPMix
 testDPMix =
   DPMix
   { clusterDist =
-      TupleDist [uniformDist (ParamVar 0) 0 100]
+      TupleDist [uniformDist (VarName 0) 0 100]
   , valuesDist =
     TupleDist
-    [uniformDist (ValueVar 0) 0 (VarExpr DoubleType (ParamVar 0)),
-     uniformDist (ValueVar 1) 0 (VarExpr DoubleType (ParamVar 0)),
-     normalDist (ValueVar 2) (ParamVar 0),
-     normalDist (ValueVar 3) (ParamVar 0)]
+    [uniformDist (VarName 1) 0 (VarExpr (VarName 0)),
+     uniformDist (VarName 2) 0 (VarExpr (VarName 0)),
+     normalDist (VarName 3) (VarName 0),
+     normalDist (VarName 4) (VarName 0)]
   }
 
 main :: IO ()

@@ -1,25 +1,29 @@
 
 module Language.Grappa.Interp.CExpr where
 
-data AtomicType
-  = DoubleType
-  | IntType
-  deriving Show
-
+-- | The types of C expressions that we are targeting with our compiler
 data CType
-  = TupleType [AtomicType]
-  | ListType CType
+  = DoubleType
+    -- ^ The C type @double@
+  | IntType
+    -- ^ The C type @int@
+  | TupleType [CType]
+    -- ^ An array of C values stored consecutively in memory, represented in C
+    -- as the type @union value *@
+  | FixedListType Int CType
+    -- ^ A fixed-length list, represented the same way as a tuple of one type
+    -- repeated a fixed number of times
+  | VarListType CType
+    -- ^ The C type @struct var_length_array*@
   deriving Show
 
+-- | C expressions with a fixed, static value
 data Literal
   = DoubleLit Double
   | IntLit Int
   deriving Show
 
-data VarName
-  = ParamVar Int
-  | ValueVar Int
-  deriving Show
+newtype VarName = VarName Int deriving Show
 
 type FunName = String
 
@@ -34,12 +38,15 @@ data BinaryOp
 
 data CExpr
   = LitExpr Literal
-  | VarExpr AtomicType VarName
+  | VarExpr VarName
   | UnaryExpr UnaryOp CExpr
   | BinaryExpr BinaryOp CExpr CExpr
   | FunCallExpr FunName [CExpr]
   | NamedVarExpr String
   | CondExpr CExpr CExpr CExpr
+  | TupleProjExpr [CType] CExpr Int
+  | FixedListProjExpr CType CExpr CExpr
+  | VarListProjExpr CType CExpr CExpr
   deriving Show
 
 instance Num CExpr where
@@ -75,22 +82,20 @@ instance Floating CExpr where
 data CFunDef = CFunDef FunName [CType] CExpr
              deriving Show
 
-data AtomicDist
+data Dist
   = DoubleDist CExpr [(VarName, CExpr)]
     -- ^ Distribution for a double value with a given PDF and its gradient
   | IntDist CExpr [(VarName, CExpr)]
     -- ^ Distribution for an int value with a given PMF
-  deriving Show
-
-data Dist
-  = TupleDist [AtomicDist]
+  | TupleDist [Dist]
     -- ^ Distribution for a fixed sequence of values, each of which is
     -- distributed according to a separate sub-distribution
-    {-
-  | ListDist Dist
+  | FixedListDist Int Dist
+    -- ^ Distribution for a fixed-length list of values, each of which is drawn
+    -- IID from the same sub-distribution
+  | VarListDist Dist
     -- ^ Distribution for a variable-length list of values, each of which is
     -- drawn IID from the same sub-distribution
-    -}
   deriving Show
 
 data DPMix =
