@@ -32,7 +32,7 @@ data UnaryOp = NegateOp | NotOp
 
 data BinaryOp
   = PlusOp | TimesOp | MinusOp | DivOp | ExpOp
-  | LTOp | LTEOp | GTOp | GTEOp | EqOp
+  | LtOp | LteOp | GtOp | GteOp | EqOp | NeOp
   | AndOp | OrOp
   deriving Show
 
@@ -102,6 +102,7 @@ data DPMix =
   DPMix
   { clusterDist :: Dist
   , valuesDist :: Dist
+  -- ???
   -- , funDefs :: [CFunDef]
   }
   deriving Show

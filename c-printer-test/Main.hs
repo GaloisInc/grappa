@@ -7,7 +7,7 @@ import Language.Grappa.Distribution
 import Language.Grappa.Interp.CExpr
 import Language.Grappa.Inference.CPrinter
 
-uniformDist :: VarName -> CExpr -> CExpr -> AtomicDist
+uniformDist :: VarName -> CExpr -> CExpr -> Dist
 uniformDist var lo hi =
   DoubleDist
   (CondExpr
@@ -15,9 +15,9 @@ uniformDist var lo hi =
    (BinaryExpr
     AndOp
     -- lo <= var
-    (BinaryExpr LTEOp lo (VarExpr var))
+    (BinaryExpr LteOp lo (VarExpr var))
     -- var <= hi
-    (BinaryExpr LTEOp (VarExpr var) hi)
+    (BinaryExpr LteOp (VarExpr var) hi)
    )
    -- Then return log (1 / (hi - lo))
    (log (1 / (hi - lo)))
@@ -27,7 +27,7 @@ uniformDist var lo hi =
   []
 
 -- | Build a normal distribution with mean given by a variable and variance 1
-normalDist :: VarName -> VarName -> AtomicDist
+normalDist :: VarName -> VarName -> Dist
 normalDist var mu =
   DoubleDist
   (Log.ln $
