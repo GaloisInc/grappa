@@ -82,10 +82,13 @@ instance Floating CExpr where
 data CFunDef = CFunDef FunName [CType] CExpr
              deriving Show
 
+newtype ParamName = ParamName Int
+                  deriving Show
+
 data Dist
-  = DoubleDist CExpr [(VarName, CExpr)]
+  = DoubleDist CExpr [(ParamName, CExpr)]
     -- ^ Distribution for a double value with a given PDF and its gradient
-  | IntDist CExpr [(VarName, CExpr)]
+  | IntDist CExpr [(ParamName, CExpr)]
     -- ^ Distribution for an int value with a given PMF
   | TupleDist [Dist]
     -- ^ Distribution for a fixed sequence of values, each of which is

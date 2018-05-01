@@ -27,25 +27,27 @@ uniformDist var lo hi =
   []
 
 -- | Build a normal distribution with mean given by a variable and variance 1
-normalDist :: VarName -> VarName -> Dist
-normalDist var mu =
+normalDist :: VarName -> CExpr -> ParamName -> Dist
+normalDist var mu muParam =
   DoubleDist
   (Log.ln $
-   normalDensityUnchecked (VarExpr mu) 1 (VarExpr var))
-  [(var, VarExpr mu - VarExpr var),
-   (mu, (VarExpr var - VarExpr mu))]
+   normalDensityUnchecked mu 1 (VarExpr var))
+  [(muParam, (VarExpr var - mu))]
 
 testDPMix :: DPMix
 testDPMix =
   DPMix
   { clusterDist =
-      TupleDist [uniformDist (VarName 0) 0 100]
+      -- double cluster_pdf(union value *x0)
+      TupleDist [uniformDist (VarName 0) 0 100
+                ,uniformDist (VarName 1) 0 100]
   , valuesDist =
+      -- double value_pdf(union value *x0, union value *x1)
     TupleDist
-    [uniformDist (VarName 1) 0 (VarExpr (VarName 0)),
-     uniformDist (VarName 2) 0 (VarExpr (VarName 0)),
-     normalDist (VarName 3) (VarName 0),
-     normalDist (VarName 4) (VarName 0)]
+    [uniformDist (VarName 1) 0 (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 0),
+     uniformDist (VarName 2) 0 (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 1),
+     normalDist (VarName 3) (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 0) (ParamName 0),
+     normalDist (VarName 4) (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 1) (ParamName 1)]
   }
 
 main :: IO ()
