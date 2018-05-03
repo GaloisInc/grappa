@@ -71,12 +71,38 @@ instance CPretty CExpr where
   cpretty (VarListProjExpr t elist eix) = error "FINISH.VarListProjExpr"
 
 instance CPretty Dist where
-  cpretty (DoubleDist e bs) = (cpretty e) <$> text "FINISH.DoubleDist"
-  cpretty (IntDist e bs) = (cpretty e) <$> text "FINISH.IntDist"
+  cpretty (DoubleDist e bs) = (cpretty e)
+  cpretty (IntDist e bs) = (cpretty e)
   --                       v ???
   cpretty (TupleDist ds) = tupled(map cpretty ds)
   cpretty (FixedListDist c d) = (int c) <+> cpretty d
   cpretty (VarListDist d) = cpretty d
+
+mkVar :: String -> Int -> String
+mkVar s i = s ++ (show i)
+
+-- pred types, last type, name prefix
+varNames :: [CType] -> CType -> String -> [String]
+varNames ts f p =
+  let l = length ts in
+  concat [map (\n -> p ++ (show n)) [0..l-2], [p ++ show (l-1)]]
+
+-- 
+mkDecls :: [(CType,String)] -> [Doc]
+mkDecls ds = map (\t -> (cpretty $ fst t) <+> space <+> text (snd t)) ds
+
+-- pred types, last type
+varDecls :: [CType] -> CType -> Doc
+varDecls ts f = tupled $ mkDecls (zip ts (varNames ts f "x"))
+
+-- fn name, decls, body
+mkDistFunc :: String -> Doc -> Doc -> Doc
+mkDistFunc f ds b = (text "double") <+> text("pdf_" ++ f) <+> ds <+> braces((text "  return") <+> b <+> semi)
+
+-- fn name, pred types, dist
+cprettyDistFun :: String -> [CType] -> Dist -> Doc
+cprettyDistFun fn ts (DoubleDist d _) = mkDistFunc fn (varDecls ts DoubleType) (cpretty d)
+cprettyDistFun fn ts (IntDist d _) = mkDistFunc fn (varDecls ts IntType) (cpretty d)
 
 instance CPretty DPMix where
   cpretty dpmix = (cpretty $ clusterDist dpmix) <$> (cpretty $ valuesDist dpmix)

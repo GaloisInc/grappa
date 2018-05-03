@@ -35,20 +35,28 @@ normalDist var mu muParam =
   [(muParam, (VarExpr var - mu))]
 
 testDPMix :: DPMix
+--testDPMix =
+--  DPMix
+--  { clusterDist =
+--      -- double cluster_pdf(union value *x0)
+--      TupleDist [uniformDist (VarName 0) 0 100
+--                ,uniformDist (VarName 1) 0 100]
+--  , valuesDist =
+--      -- double value_pdf(union value *x0, union value *x1)
+--    TupleDist
+--    [uniformDist (VarName 1) 0 (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 0),
+--     uniformDist (VarName 2) 0 (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 1),
+--     normalDist (VarName 3) (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 0) (ParamName 0),
+--     normalDist (VarName 4) (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 1) (ParamName 1)]
+--  }
+
 testDPMix =
-  DPMix
-  { clusterDist =
-      -- double cluster_pdf(union value *x0)
-      TupleDist [uniformDist (VarName 0) 0 100
-                ,uniformDist (VarName 1) 0 100]
-  , valuesDist =
-      -- double value_pdf(union value *x0, union value *x1)
-    TupleDist
-    [uniformDist (VarName 1) 0 (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 0),
-     uniformDist (VarName 2) 0 (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 1),
-     normalDist (VarName 3) (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 0) (ParamName 0),
-     normalDist (VarName 4) (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 1) (ParamName 1)]
-  }
+  DPMix { clusterDist = uniformDist (VarName 0) 0 100
+        , valuesDist = uniformDist (VarName 1) 10 50 }
+
+-- REMOVE
+tcp = cprettyDistFun "foo" [DoubleType, DoubleType] (uniformDist (VarName 0) 0 100)
+
 
 main :: IO ()
 main = putStrLn (showDPMix testDPMix)
