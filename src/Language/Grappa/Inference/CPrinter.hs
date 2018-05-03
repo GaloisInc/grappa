@@ -97,7 +97,7 @@ varDecls ts f = tupled $ mkDecls (zip ts (varNames ts f "x"))
 
 -- fn name, decls, body
 mkDistFunc :: String -> Doc -> Doc -> Doc
-mkDistFunc f ds b = (text "double") <+> text("pdf_" ++ f) <+> ds <+> braces((text "  return") <+> b <+> semi)
+mkDistFunc f ds b = (text "double") <+> text("pdf_" ++ f) <+> ds <$> braces(line <+> indent 4 ((text "return") <+> b <> semi) <+> line)
 
 -- fn name, pred types, dist
 cprettyDistFun :: String -> [CType] -> Dist -> Doc
