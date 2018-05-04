@@ -54,9 +54,5 @@ testDPMix =
   DPMix { clusterDist = uniformDist (VarName 0) 0 100
         , valuesDist = uniformDist (VarName 1) 10 50 }
 
--- REMOVE
-tcp = cprettyDistFun "foo" [DoubleType, DoubleType] (uniformDist (VarName 0) 0 100)
-
-
 main :: IO ()
 main = putStrLn (showDPMix testDPMix)
