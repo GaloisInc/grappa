@@ -3,9 +3,9 @@ module Language.Grappa.Inference.CPrinter where
 
 import Prelude hiding ( (<$>) )
 import Text.PrettyPrint.ANSI.Leijen
+import GHC.IO.Handle.FD
 
 import Language.Grappa.Interp.CExpr
-import GHC.IO.Handle.FD
 
 
 -- | The class for C expressions, distributions, etc., that can be printed
@@ -63,7 +63,6 @@ instance CPretty CExpr where
   cpretty (VarExpr v) = cpretty v
   cpretty (UnaryExpr o e) = parens((cpretty o) <> cpretty e)
   cpretty (BinaryExpr o el er) = parens((cpretty el) <+> (cpretty o) <+> cpretty er)
-  --                            v ??? [type FunName = String]
   cpretty (FunCallExpr f as) = (text f) <> (tupled $ map cpretty as)
   cpretty (NamedVarExpr s) = text s
   cpretty (CondExpr t c a) = parens((cpretty t) <+> (text "?") <+> (cpretty c) <+> (text ":") <+> cpretty a)
@@ -88,7 +87,7 @@ varNames ts f p =
   let l = length ts in
   concat [map (\n -> p ++ (show n)) [0..l-2], [p ++ show (l-1)]]
 
--- 
+-- [(type, name)]
 mkDecls :: [(CType,String)] -> [Doc]
 mkDecls ds = map (\t -> (cpretty $ fst t) <+> text (snd t)) ds
 
@@ -111,36 +110,13 @@ cprettyDistFun fn ts (DoubleDist d _) = mkDistFunc fn (varDecls ts DoubleType) (
 cprettyDistFun fn ts (IntDist d _) = mkDistFunc fn (varDecls ts IntType) (cpretty d)
 
 -- doc
+renderCode :: Doc -> IO ()
 renderCode d = displayIO stdout $ renderPretty 0.8 80 d
 
 instance CPretty DPMix where
-  cpretty dpmix = (cpretty $ clusterDist dpmix) <$> (cpretty $ valuesDist dpmix)
+  cpretty dpmix = cd <$> vd where
+    cd = cprettyDistFun "cluster" [] (clusterDist dpmix)
+    vd = cprettyDistFun "values" [] (valuesDist dpmix)
 
 showDPMix :: DPMix -> String
 showDPMix dpmix = show (cpretty dpmix)
-
-
-
-
--- ------------------------------------------------------------
--- REMOVE
-uniformDistX :: VarName -> CExpr -> CExpr -> Dist
-uniformDistX var lo hi =
-  DoubleDist
-  (CondExpr
-   -- If (lo <= var && var <= hi)
-   (BinaryExpr
-    AndOp
-    -- lo <= var
-    (BinaryExpr LteOp lo (VarExpr var))
-    -- var <= hi
-    (BinaryExpr LteOp (VarExpr var) hi)
-   )
-   -- Then return log (1 / (hi - lo))
-   (log (1 / (hi - lo)))
-   -- Else return -INF
-   (log 0))
-  -- No gradients for the uniform dist
-  []
-
-tcp = renderCode $ cprettyDistFun "foo" [DoubleType, DoubleType] (uniformDistX (VarName 0) 0 100)
