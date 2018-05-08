@@ -34,18 +34,18 @@ instance CPretty VarName where
   cpretty (VarName n) = text $ "g_" <> show n
 
 instance CPretty UnaryOp where
-  cpretty NegateOp = text "~"
-  cpretty NotOp = text "!"
+  cpretty NegateOp = char '~'
+  cpretty NotOp = char '!'
 
 instance CPretty BinaryOp where
-  cpretty PlusOp = text "+"
-  cpretty TimesOp = text "*"
-  cpretty MinusOp = text "-"
-  cpretty DivOp = text "/"
+  cpretty PlusOp = char '+'
+  cpretty TimesOp = char '*'
+  cpretty MinusOp = char '-'
+  cpretty DivOp = char '/'
   cpretty ExpOp = text "**"
-  cpretty LtOp = text "<"
+  cpretty LtOp = char '<'
   cpretty LteOp = text "<="
-  cpretty GtOp = text ">"
+  cpretty GtOp = char '>'
   cpretty GteOp = text ">="
   cpretty EqOp = text "=="
   cpretty NeOp = text "!="
@@ -56,7 +56,7 @@ valueArrayProj :: CExpr -> CExpr -> CType -> Doc
 valueArrayProj tup off DoubleType =
   (cpretty tup) <> brackets(cpretty off) <> text ".double_value"
 valueArrayProj tup off (TupleType _) =
-  (text "&") <> parens(cpretty tup) <> brackets(cpretty off)
+  (char '&') <> parens(cpretty tup) <> brackets(cpretty off)
 
 instance CPretty CExpr where
   cpretty (LitExpr l) = cpretty l
@@ -65,7 +65,7 @@ instance CPretty CExpr where
   cpretty (BinaryExpr o el er) = parens((cpretty el) <+> (cpretty o) <+> cpretty er)
   cpretty (FunCallExpr f as) = (text f) <> (tupled $ map cpretty as)
   cpretty (NamedVarExpr s) = text s
-  cpretty (CondExpr t c a) = parens((cpretty t) <+> (text "?") <+> (cpretty c) <+> (text ":") <+> cpretty a)
+  cpretty (CondExpr t c a) = parens((cpretty t) <+> (char '?') <+> (cpretty c) <+> (char ':') <+> cpretty a)
   cpretty (TupleProjExpr ts e i) = valueArrayProj e (LitExpr $ IntLit $ sum(map size $ take i ts)) (ts !! i)
   cpretty (FixedListProjExpr t elist eix) = valueArrayProj elist (eix * LitExpr (IntLit (size t))) t
   cpretty (VarListProjExpr t elist eix) = error "FINISH.VarListProjExpr"
@@ -73,7 +73,7 @@ instance CPretty CExpr where
 instance CPretty Dist where
   cpretty (DoubleDist e bs) = (cpretty e)
   cpretty (IntDist e bs) = (cpretty e)
-  cpretty (TupleDist ds) = cat $ punctuate (space <> (text "+") <> space) (map cpretty ds)
+  cpretty (TupleDist ds) = cat $ punctuate (space <> (char '+') <> space) (map cpretty ds)
   cpretty (FixedListDist c d) = (int c) <+> cpretty d
   cpretty (VarListDist d) = cpretty d
 
@@ -120,5 +120,5 @@ instance CPretty DPMix where
     cd = cprettyDistFun "cluster" [] (clusterDist dpmix)
     vd = cprettyDistFun "values" [] (valuesDist dpmix)
 
-showDPMix :: DPMix -> String
-showDPMix dpmix = show (cpretty dpmix)
+showDPMix :: DPMix -> IO ()
+showDPMix dpmix = renderCode (cpretty dpmix)

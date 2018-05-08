@@ -51,4 +51,4 @@ testDPMix =
   }
 
 main :: IO ()
-main = putStrLn (showDPMix testDPMix)
+main = showDPMix testDPMix
