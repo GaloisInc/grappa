@@ -73,8 +73,7 @@ instance CPretty CExpr where
 instance CPretty Dist where
   cpretty (DoubleDist e bs) = (cpretty e)
   cpretty (IntDist e bs) = (cpretty e)
-  --                       v ???
-  cpretty (TupleDist ds) = tupled(map cpretty ds)
+  cpretty (TupleDist ds) = cat $ punctuate (space <> (text "+") <> space) (map cpretty ds)
   cpretty (FixedListDist c d) = (int c) <+> cpretty d
   cpretty (VarListDist d) = cpretty d
 
@@ -93,7 +92,6 @@ mkDecls ds = map (\t -> (cpretty $ fst t) <+> text (snd t)) ds
 
 -- pred types, last type
 varDecls :: [CType] -> CType -> Doc
---varDecls ts f = tupled $ mkDecls (zip ts (varNames ts f "x"))
 varDecls ts f = encloseSep lparen rparen (comma <> space) (mkDecls (zip ts (varNames ts f "x")))
 
 -- body
@@ -108,6 +106,10 @@ mkDistFunc f ds b = (text "double") <+> text("pdf_" ++ f) <+> ds <+> mkBody b
 cprettyDistFun :: String -> [CType] -> Dist -> Doc
 cprettyDistFun fn ts (DoubleDist d _) = mkDistFunc fn (varDecls ts DoubleType) (cpretty d)
 cprettyDistFun fn ts (IntDist d _) = mkDistFunc fn (varDecls ts IntType) (cpretty d)
+-- FINISH vvv -- how are dists to be combined?
+cprettyDistFun fn ts (TupleDist ds) = mkDistFunc fn (varDecls ts (TupleType ts)) (cpretty (TupleDist ds))
+cprettyDistFun fn ts (FixedListDist _ d) = error "FINISH.FixedListDist"
+cprettyDistFun fn ts (VarListDist d) = error "FINISH.VarListDist"
 
 -- doc
 renderCode :: Doc -> IO ()
