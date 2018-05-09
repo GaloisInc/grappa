@@ -62,10 +62,10 @@ instance CPretty CExpr where
   cpretty (LitExpr l) = cpretty l
   cpretty (VarExpr v) = cpretty v
   cpretty (UnaryExpr o e) = parens((cpretty o) <> cpretty e)
-  cpretty (BinaryExpr o el er) = parens((cpretty el) <+> (cpretty o) <+> cpretty er)
+  cpretty (BinaryExpr o el er) = parens(nest 2 (fillSep [cpretty el, (cpretty o) <+> cpretty er]))
   cpretty (FunCallExpr f as) = (text f) <> (tupled $ map cpretty as)
   cpretty (NamedVarExpr s) = text s
-  cpretty (CondExpr t c a) = parens((cpretty t) <+> (char '?') <+> (cpretty c) <+> (char ':') <+> cpretty a)
+  cpretty (CondExpr t c a) = parens(nest 2 (vcat [(cpretty t), (char '?') <+> (cpretty c), (char ':') <+> (cpretty a)]))
   cpretty (TupleProjExpr ts e i) = valueArrayProj e (LitExpr $ IntLit $ sum(map size $ take i ts)) (ts !! i)
   cpretty (FixedListProjExpr t elist eix) = valueArrayProj elist (eix * LitExpr (IntLit (size t))) t
   cpretty (VarListProjExpr t elist eix) = error "FINISH.VarListProjExpr"
@@ -113,7 +113,7 @@ cprettyDistFun fn ts (VarListDist d) = error "FINISH.VarListDist"
 
 -- doc
 renderCode :: Doc -> IO ()
-renderCode d = displayIO stdout $ renderPretty 0.8 80 d
+renderCode d = displayIO stdout $ renderPretty 0.8 72 d
 
 instance CPretty DPMix where
   cpretty dpmix = cd <$> vd where
