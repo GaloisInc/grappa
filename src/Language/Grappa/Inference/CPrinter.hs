@@ -26,12 +26,19 @@ size (TupleType ts) = sum $ map size ts
 size (FixedListType n t) = n * size t
 size (VarListType _) = 1
 
+distType :: Dist -> CType
+distType (DoubleDist _ _) = DoubleType
+distType (IntDist _ _) = IntType
+distType (TupleDist ds) = TupleType $ map distType ds
+distType (FixedListDist i d) = FixedListType i $ distType d
+distType (VarListDist d) = VarListType $ distType d
+
 instance CPretty Literal where
   cpretty (DoubleLit d) = double d
   cpretty (IntLit i) = int i
 
 instance CPretty VarName where
-  cpretty (VarName n) = text $ "g_" <> show n
+  cpretty (VarName n) = text $ "x" <> show n
 
 instance CPretty UnaryOp where
   cpretty NegateOp = char '~'
@@ -82,33 +89,61 @@ mkVar :: String -> Int -> String
 mkVar s i = s ++ (show i)
 
 -- pred types, last type, name prefix
-varNames :: [CType] -> CType -> String -> [String]
-varNames ts f p =
-  let l = length ts in
-  concat [map (\n -> p ++ (show n)) [0..l-2], [p ++ show (l-1)]]
+varNames :: [String]
+varNames = map (\i -> "x" ++ show i) [0..]
 
 -- [(type, name)]
-mkDecls :: [(CType,String)] -> [Doc]
-mkDecls ds = map (\t -> (cpretty $ fst t) <+> text (snd t)) ds
+mkDecls :: [(String,CType)] -> [Doc]
+mkDecls ds = map (\t -> (cpretty $ snd t) <+> text (fst t)) ds
 
--- pred types, last type
-varDecls :: [CType] -> CType -> Doc
-varDecls ts f = encloseSep lparen rparen (comma <> space) (mkDecls (zip ts (varNames ts f "x")))
+-- type, name, initializer
+mkVarDecl :: CType -> String -> Maybe Doc -> Doc
+mkVarDecl t n (Just i) = (cpretty t) <+> text n <+> char '=' <+> i <+> semi
+mkVarDecl t n Nothing = (cpretty t) <+> text n <+> semi
+
+-- 
+mkReturn :: Doc -> Doc
+mkReturn d = text "return" <+> d <> semi
+
+-- [(name,type)]
+varDecls :: [(String,CType)] -> Doc
+varDecls ds = encloseSep lparen rparen (comma <> space) (mkDecls ds)
 
 -- body
 mkBody :: Doc -> Doc
-mkBody b = lbrace <$> (indent 4 ((text "return") <+> b <> semi)) <> line <> rbrace <> line
+mkBody b = lbrace <$> (indent 4 b) <$> rbrace <> line
 
 -- fn name, decls, body
 mkDistFunc :: String -> Doc -> Doc -> Doc
 mkDistFunc f ds b = (text "double") <+> text("pdf_" ++ f) <+> ds <+> mkBody b
 
+mkExtFunc :: String -> Int -> String
+mkExtFunc n i = n ++ "_" ++ show i
+
 -- fn name, pred types, dist
 cprettyDistFun :: String -> [CType] -> Dist -> Doc
-cprettyDistFun fn ts (DoubleDist d _) = mkDistFunc fn (varDecls ts DoubleType) (cpretty d)
-cprettyDistFun fn ts (IntDist d _) = mkDistFunc fn (varDecls ts IntType) (cpretty d)
+cprettyDistFun fn ts (DoubleDist d _) =
+  mkDistFunc fn (varDecls $ zip varNames (ts ++ [DoubleType])) (mkReturn $ cpretty d)
+cprettyDistFun fn ts (IntDist d _) =
+  mkDistFunc fn (varDecls $ zip varNames (ts ++ [IntType])) (mkReturn $ cpretty d)
 -- FIX: recur to emit dist funcs ref'd by td, then emit td func
-cprettyDistFun fn ts (TupleDist ds) = mkDistFunc fn (varDecls ts (TupleType ts)) (cpretty (TupleDist ds))
+cprettyDistFun fn ts da@(TupleDist ds) =
+  vcat
+  (map (\(d,i) -> cprettyDistFun (mkExtFunc fn i) (ts ++ map distType (take i ds)) d)
+   (zip ds [0..])
+   ++
+   [mkDistFunc fn (varDecls (zip varNames ts ++ [("tup", distType da)])) $
+    vcat
+    (map (\(d,i) ->
+          mkVarDecl (distType d) ("x" ++ show (length ts + i))
+          (Just $
+           valueArrayProj (NamedVarExpr "tup") (LitExpr $ IntLit i)
+           (distType d)))
+         (zip ds [0..])
+     ++ [mkReturn $ cpretty $ sum $
+         map (\i -> FunCallExpr ("pdf_" ++ mkExtFunc fn i)
+                    (map (VarExpr . VarName) [0..(length ts + i)]))
+         [0..(length ds - 1)]])])
 cprettyDistFun fn ts (FixedListDist _ d) = error "FINISH.FixedListDist"
 cprettyDistFun fn ts (VarListDist d) = error "FINISH.VarListDist"
 
@@ -119,7 +154,7 @@ renderCode d = displayIO stdout $ renderPretty 0.8 72 d
 instance CPretty DPMix where
   cpretty dpmix = cd <$> vd where
     cd = cprettyDistFun "cluster" [] (clusterDist dpmix)
-    vd = cprettyDistFun "values" [] (valuesDist dpmix)
+    vd = cprettyDistFun "values" [distType $ clusterDist dpmix] (valuesDist dpmix)
 
 showDPMix :: DPMix -> IO ()
 showDPMix dpmix = renderCode (cpretty dpmix)
