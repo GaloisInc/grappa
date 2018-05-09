@@ -62,8 +62,8 @@ instance CPretty CExpr where
   cpretty (LitExpr l) = cpretty l
   cpretty (VarExpr v) = cpretty v
   cpretty (UnaryExpr o e) = parens((cpretty o) <> cpretty e)
-  cpretty (BinaryExpr o el er) = parens(nest 2 (fillSep [cpretty el, (cpretty o) <+> cpretty er]))
-  cpretty (FunCallExpr f as) = (text f) <> (tupled $ map cpretty as)
+  cpretty (BinaryExpr o el er) = parens(nest 2 (sep [cpretty el, (cpretty o) <+> cpretty er]))
+  cpretty (FunCallExpr f as) = group((text f) <> (tupled $ map cpretty as))
   cpretty (NamedVarExpr s) = text s
   cpretty (CondExpr t c a) = parens(nest 2 (vcat [(cpretty t), (char '?') <+> (cpretty c), (char ':') <+> (cpretty a)]))
   cpretty (TupleProjExpr ts e i) = valueArrayProj e (LitExpr $ IntLit $ sum(map size $ take i ts)) (ts !! i)
@@ -73,6 +73,7 @@ instance CPretty CExpr where
 instance CPretty Dist where
   cpretty (DoubleDist e bs) = (cpretty e)
   cpretty (IntDist e bs) = (cpretty e)
+  -- FIX: recur to emit dist funcs ref'd by td, then emit td func
   cpretty (TupleDist ds) = cat $ punctuate (space <> (char '+') <> space) (map cpretty ds)
   cpretty (FixedListDist c d) = (int c) <+> cpretty d
   cpretty (VarListDist d) = cpretty d
@@ -106,7 +107,7 @@ mkDistFunc f ds b = (text "double") <+> text("pdf_" ++ f) <+> ds <+> mkBody b
 cprettyDistFun :: String -> [CType] -> Dist -> Doc
 cprettyDistFun fn ts (DoubleDist d _) = mkDistFunc fn (varDecls ts DoubleType) (cpretty d)
 cprettyDistFun fn ts (IntDist d _) = mkDistFunc fn (varDecls ts IntType) (cpretty d)
--- FINISH vvv -- how are dists to be combined?
+-- FIX: recur to emit dist funcs ref'd by td, then emit td func
 cprettyDistFun fn ts (TupleDist ds) = mkDistFunc fn (varDecls ts (TupleType ts)) (cpretty (TupleDist ds))
 cprettyDistFun fn ts (FixedListDist _ d) = error "FINISH.FixedListDist"
 cprettyDistFun fn ts (VarListDist d) = error "FINISH.VarListDist"
