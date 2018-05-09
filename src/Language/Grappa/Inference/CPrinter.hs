@@ -62,8 +62,14 @@ instance CPretty BinaryOp where
 valueArrayProj :: CExpr -> CExpr -> CType -> Doc
 valueArrayProj tup off DoubleType =
   (cpretty tup) <> brackets(cpretty off) <> text ".double_value"
+valueArrayProj tup off IntType =
+  (cpretty tup) <> brackets(cpretty off) <> text ".int_value"
 valueArrayProj tup off (TupleType _) =
   (char '&') <> parens(cpretty tup) <> brackets(cpretty off)
+valueArrayProj tup off (FixedListType _) =
+  (char '&') <> parens(cpretty tup) <> brackets(cpretty off)
+valueArrayProj tup off (VarListType _) =
+  (cpretty tup) <> brackets(cpretty off) <> text ".var_array_value"
 
 instance CPretty CExpr where
   cpretty (LitExpr l) = cpretty l
