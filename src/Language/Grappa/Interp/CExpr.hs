@@ -17,6 +17,13 @@ data CType
     -- ^ The C type @struct var_length_array*@
   deriving Show
 
+size :: CType -> Int
+size DoubleType = 1
+size IntType = 1
+size (TupleType ts) = sum $ map size ts
+size (FixedListType n t) = n * size t
+size (VarListType _) = 1
+
 -- | C expressions with a fixed, static value
 data Literal
   = DoubleLit Double
@@ -100,6 +107,13 @@ data Dist
     -- ^ Distribution for a variable-length list of values, each of which is
     -- drawn IID from the same sub-distribution
   deriving Show
+
+distType :: Dist -> CType
+distType (DoubleDist _ _) = DoubleType
+distType (IntDist _ _) = IntType
+distType (TupleDist ds) = TupleType $ map distType ds
+distType (FixedListDist i d) = FixedListType i $ distType d
+distType (VarListDist d) = VarListType $ distType d
 
 data DPMix =
   DPMix

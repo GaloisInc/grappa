@@ -19,20 +19,6 @@ instance CPretty CType where
   cpretty (FixedListType _ _) = text "union value *"
   cpretty (VarListType _) = text "struct var_length_array *"
 
-size :: CType -> Int
-size DoubleType = 1
-size IntType = 1
-size (TupleType ts) = sum $ map size ts
-size (FixedListType n t) = n * size t
-size (VarListType _) = 1
-
-distType :: Dist -> CType
-distType (DoubleDist _ _) = DoubleType
-distType (IntDist _ _) = IntType
-distType (TupleDist ds) = TupleType $ map distType ds
-distType (FixedListDist i d) = FixedListType i $ distType d
-distType (VarListDist d) = VarListType $ distType d
-
 instance CPretty Literal where
   cpretty (DoubleLit d) = double d
   cpretty (IntLit i) = int i
