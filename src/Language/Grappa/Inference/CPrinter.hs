@@ -90,8 +90,8 @@ mkDecls ds = map (\t -> (cpretty $ snd t) <+> text (fst t)) ds
 
 -- type, name, initializer
 mkVarDecl :: CType -> String -> Maybe Doc -> Doc
-mkVarDecl t n (Just i) = (cpretty t) <+> text n <+> char '=' <+> i <+> semi
-mkVarDecl t n Nothing = (cpretty t) <+> text n <+> semi
+mkVarDecl t n (Just i) = (cpretty t) <+> text n <+> char '=' <+> i <> semi
+mkVarDecl t n Nothing = (cpretty t) <+> text n <> semi
 
 -- 
 mkReturn :: Doc -> Doc
