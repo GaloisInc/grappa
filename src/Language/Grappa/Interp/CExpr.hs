@@ -119,7 +119,6 @@ data DPMix =
   DPMix
   { clusterDist :: Dist
   , valuesDist :: Dist
-  -- ???
-  -- , funDefs :: [CFunDef]
+  , funDefs :: [CFunDef]
   }
   deriving Show

@@ -48,6 +48,7 @@ testDPMix =
      uniformDist (VarName 2) 0 (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 1),
      normalDist (VarName 3) (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 0) (ParamName 0),
      normalDist (VarName 4) (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 1) (ParamName 1)]
+  , funDefs = []
   }
 
 main :: IO ()
