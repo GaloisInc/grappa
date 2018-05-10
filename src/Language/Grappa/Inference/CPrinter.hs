@@ -67,7 +67,7 @@ instance CPretty CExpr where
   cpretty (CondExpr t c a) = parens(nest 2 (vcat [(cpretty t), (char '?') <+> (cpretty c), (char ':') <+> (cpretty a)]))
   cpretty (TupleProjExpr ts e i) = valueArrayProj e (LitExpr $ IntLit $ sum(map size $ take i ts)) (ts !! i)
   cpretty (FixedListProjExpr t elist eix) = valueArrayProj elist (eix * LitExpr (IntLit (size t))) t
-  cpretty (VarListProjExpr t elist eix) = error "FINISH.VarListProjExpr"
+  cpretty (VarListProjExpr _ _ _) = error "FINISH.VarListProjExpr"
 
 instance CPretty Dist where
   cpretty (DoubleDist e _) = (cpretty e)
@@ -136,8 +136,8 @@ cprettyDistFun fn ts da@(TupleDist ds) =
          map (\i -> FunCallExpr ("pdf_" ++ mkExtFunc fn i)
                     (map (VarExpr . VarName) [0..(length ts + i)]))
          [0..(length ds - 1)]])])
-cprettyDistFun fn ts (FixedListDist _ d) = error "FINISH.FixedListDist"
-cprettyDistFun fn ts (VarListDist d) = error "FINISH.VarListDist"
+cprettyDistFun _ _ (FixedListDist _ _) = error "FINISH.FixedListDist"
+cprettyDistFun _ _ (VarListDist _) = error "FINISH.VarListDist"
 
 -- doc
 renderCode :: Doc -> IO ()
