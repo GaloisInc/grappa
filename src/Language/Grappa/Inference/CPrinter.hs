@@ -84,8 +84,8 @@ instance CPretty CExpr where
   cpretty (VarListProjExpr t elist eix) = error "FINISH.VarListProjExpr"
 
 instance CPretty Dist where
-  cpretty (DoubleDist e bs) = (cpretty e)
-  cpretty (IntDist e bs) = (cpretty e)
+  cpretty (DoubleDist e _) = (cpretty e)
+  cpretty (IntDist e _) = (cpretty e)
   -- FIX: recur to emit dist funcs ref'd by td, then emit td func
   cpretty (TupleDist ds) = cat $ punctuate (space <> (char '+') <> space) (map cpretty ds)
   cpretty (FixedListDist c d) = (int c) <+> cpretty d
@@ -96,7 +96,7 @@ mkVar s i = s ++ (show i)
 
 -- pred types, last type, name prefix
 varNames :: [String]
-varNames = map (\i -> "x" ++ show i) [0..]
+varNames = map (\i -> "x" ++ show (i :: Int)) [0..]
 
 -- [(type, name)]
 mkDecls :: [(String,CType)] -> [Doc]
