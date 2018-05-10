@@ -66,7 +66,7 @@ valueArrayProj tup off IntType =
   (cpretty tup) <> brackets(cpretty off) <> text ".int_value"
 valueArrayProj tup off (TupleType _) =
   (char '&') <> parens(cpretty tup) <> brackets(cpretty off)
-valueArrayProj tup off (FixedListType _) =
+valueArrayProj tup off (FixedListType _ _) =
   (char '&') <> parens(cpretty tup) <> brackets(cpretty off)
 valueArrayProj tup off (VarListType _) =
   (cpretty tup) <> brackets(cpretty off) <> text ".var_array_value"
