@@ -95,7 +95,7 @@ mkVarDecl t n Nothing = (cpretty t) <+> text n <> semi
 
 -- 
 mkReturn :: Doc -> Doc
-mkReturn d = text "return" <+> d <> semi
+mkReturn d = text "return" <+> align(d <> semi)
 
 -- [(name,type)]
 varDecls :: [(String,CType)] -> Doc
