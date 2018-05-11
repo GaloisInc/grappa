@@ -45,18 +45,6 @@ instance CPretty BinaryOp where
   cpretty AndOp = text "&&"
   cpretty OrOp = text "||"
 
-valueArrayProj :: CExpr -> CExpr -> CType -> Doc
-valueArrayProj tup off DoubleType =
-  (cpretty tup) <> brackets(cpretty off) <> text ".double_value"
-valueArrayProj tup off IntType =
-  (cpretty tup) <> brackets(cpretty off) <> text ".int_value"
-valueArrayProj tup off (TupleType _) =
-  (char '&') <> parens(cpretty tup) <> brackets(cpretty off)
-valueArrayProj tup off (FixedListType _ _) =
-  (char '&') <> parens(cpretty tup) <> brackets(cpretty off)
-valueArrayProj tup off (VarListType _) =
-  (cpretty tup) <> brackets(cpretty off) <> text ".var_array_value"
-
 instance CPretty CExpr where
   cpretty (LitExpr l) = cpretty l
   cpretty (VarExpr v) = cpretty v
@@ -76,50 +64,27 @@ instance CPretty CExpr where
     valueArrayProj elist (eix * LitExpr (IntLit (size t))) t
   cpretty (VarListProjExpr _ _ _) = error "FINISH.VarListProjExpr"
 
+-- tuple, offset, dist type
+valueArrayProj :: CExpr -> CExpr -> CType -> Doc
+valueArrayProj tup off DoubleType =
+  (cpretty tup) <> brackets(cpretty off) <> text ".double_value"
+valueArrayProj tup off IntType =
+  (cpretty tup) <> brackets(cpretty off) <> text ".int_value"
+valueArrayProj tup off (TupleType _) =
+  (char '&') <> parens(cpretty tup) <> brackets(cpretty off)
+valueArrayProj tup off (FixedListType _ _) =
+  (char '&') <> parens(cpretty tup) <> brackets(cpretty off)
+valueArrayProj tup off (VarListType _) =
+  (cpretty tup) <> brackets(cpretty off) <> text ".var_array_value"
+
 instance CPretty Dist where
   cpretty (DoubleDist e _) = (cpretty e)
   cpretty (IntDist e _) = (cpretty e)
   cpretty (TupleDist ds) =
     cat $ punctuate (space <> (char '+') <> space) (map cpretty ds)
+  -- FINISH:
   cpretty (FixedListDist c d) = (int c) <+> cpretty d
   cpretty (VarListDist d) = cpretty d
-
--- prefix, ordinal
-mkVar :: String -> Int -> String
-mkVar s i = s ++ (show i)
-
--- pred types, last type, name prefix
-varNames :: [String]
-varNames = map (\i -> "x" ++ show (i :: Int)) [0..]
-
--- [(type, name)]
-mkDecls :: [(String,CType)] -> [Doc]
-mkDecls ds = map (\t -> (cpretty $ snd t) <+> text (fst t)) ds
-
--- type, name, initializer
-mkVarDecl :: CType -> String -> Maybe Doc -> Doc
-mkVarDecl t n (Just i) = (cpretty t) <+> text n <+> char '=' <+> i <> semi
-mkVarDecl t n Nothing = (cpretty t) <+> text n <> semi
-
--- expr
-mkReturn :: Doc -> Doc
-mkReturn d = text "return" <+> align(d <> semi)
-
--- [(name,type)]
-varDecls :: [(String,CType)] -> Doc
-varDecls ds = encloseSep lparen rparen (comma <> space) (mkDecls ds)
-
--- body
-mkBody :: Doc -> Doc
-mkBody b = lbrace <$> (indent 4 b) <$> rbrace <> line
-
--- fn name, decls, body
-mkDistFunc :: String -> Doc -> Doc -> Doc
-mkDistFunc f ds b = (text "double") <+> text("pdf_" ++ f) <+> ds <+> mkBody b
-
--- fn basename, ordinal
-mkExtFunc :: String -> Int -> String
-mkExtFunc n i = n ++ "_" ++ show i
 
 -- fn name, pred types, dist
 cprettyDistFun :: String -> [CType] -> Dist -> Doc
@@ -155,6 +120,39 @@ cprettyDistFun fn ts da@(TupleDist ds) =
 cprettyDistFun _ _ (FixedListDist _ _) = error "FINISH.FixedListDist"
 cprettyDistFun _ _ (VarListDist _) = error "FINISH.VarListDist"
 
+-- type, name, initializer
+mkVarDecl :: CType -> String -> Maybe Doc -> Doc
+mkVarDecl t n (Just i) = (cpretty t) <+> text n <+> char '=' <+> i <> semi
+mkVarDecl t n Nothing = (cpretty t) <+> text n <> semi
+
+-- fn name, decls, body
+mkDistFunc :: String -> Doc -> Doc -> Doc
+mkDistFunc f ds b = (text "double") <+> text("pdf_" ++ f) <+> ds <+> mkBody b
+
+-- body
+mkBody :: Doc -> Doc
+mkBody b = lbrace <$> (indent 4 b) <$> rbrace <> line
+
+-- fn basename, ordinal
+mkExtFunc :: String -> Int -> String
+mkExtFunc n i = n ++ "_" ++ show i
+
+-- [(name,type)]
+varDecls :: [(String,CType)] -> Doc
+varDecls ds = encloseSep lparen rparen (comma <> space) (mkDecls ds)
+
+-- [(type, name)]
+mkDecls :: [(String,CType)] -> [Doc]
+mkDecls ds = map (\t -> (cpretty $ snd t) <+> text (fst t)) ds
+
+-- pred types, last type, name prefix
+varNames :: [String]
+varNames = map (\i -> "x" ++ show (i :: Int)) [0..]
+
+-- expr
+mkReturn :: Doc -> Doc
+mkReturn d = text "return" <+> align(d <> semi)
+
 instance CPretty DPMix where
   cpretty dpmix = cd <$> vd where
     cd = cprettyDistFun "cluster" [] (clusterDist dpmix)
@@ -162,9 +160,8 @@ instance CPretty DPMix where
                         [distType $ clusterDist dpmix]
                         (valuesDist dpmix)
 
--- doc
-renderCode :: Doc -> IO ()
-renderCode d = displayIO stdout $ renderPretty 0.8 72 d
-
 showDPMix :: DPMix -> IO ()
 showDPMix dpmix = renderCode (cpretty dpmix)
+
+renderCode :: Doc -> IO ()
+renderCode d = displayIO stdout $ renderPretty 0.8 72 d
