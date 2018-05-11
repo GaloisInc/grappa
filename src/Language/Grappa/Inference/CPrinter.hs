@@ -100,23 +100,13 @@ cprettyDistFun fn ts (IntDist d _) =
    (mkReturn $ cpretty d)
 cprettyDistFun fn ts da@(TupleDist ds) =
   vcat
-  (map
-   (\(d,i) ->
-    cprettyDistFun (mkExtFunc fn i) (ts ++ map distType (take i ds)) d)
-   (zip ds [0..])
-   ++
-   [mkDistFunc fn (varDecls (zip varNames ts ++ [("tup", distType da)])) $
-    vcat
-    (map (\(d,i) ->
-          mkVarDecl (distType d) ("x" ++ show (length ts + i))
-          (Just $
-           valueArrayProj (NamedVarExpr "tup") (LitExpr $ IntLit i)
-           (distType d)))
-         (zip ds [0..])
-     ++ [mkReturn $ cpretty $ sum $
-         map (\i -> FunCallExpr ("pdf_" ++ mkExtFunc fn i)
-                    (map (VarExpr . VarName) [0..(length ts + i)]))
-         [0..(length ds - 1)]])])
+   (mkRefdDists fn ts ds
+    ++
+    [mkDistFunc
+     fn
+     (varDecls (zip varNames ts ++ [("tup", distType da)]))
+     (vcat $ mkBodyT fn ts ds)])
+-- FINISH:
 cprettyDistFun _ _ (FixedListDist _ _) = error "FINISH.FixedListDist"
 cprettyDistFun _ _ (VarListDist _) = error "FINISH.VarListDist"
 
@@ -152,6 +142,29 @@ varNames = map (\i -> "x" ++ show (i :: Int)) [0..]
 -- expr
 mkReturn :: Doc -> Doc
 mkReturn d = text "return" <+> align(d <> semi)
+
+-- fn basename, types, dists
+mkRefdDists :: String -> [CType] -> [Dist] -> [Doc]
+mkRefdDists fn ts ds =
+  map (\(d,i) -> cprettyDistFun
+                  (mkExtFunc fn i)
+                  (ts ++ map distType (take i ds))
+                  d)
+      (zip ds [0..])
+
+-- fn name, types, dists
+mkBodyT :: String -> [CType] -> [Dist] -> [Doc]
+mkBodyT fn ts ds =
+  map (\(d,i) ->
+       mkVarDecl (distType d) ("x" ++ show (length ts + i))
+       (Just $
+        valueArrayProj (NamedVarExpr "tup") (LitExpr $ IntLit i)
+        (distType d)))
+      (zip ds [0..])
+  ++ [mkReturn $ cpretty $ sum $
+      map (\i -> FunCallExpr ("pdf_" ++ mkExtFunc fn i)
+                 (map (VarExpr . VarName) [0..(length ts + i)]))
+      [0..(length ds - 1)]]
 
 instance CPretty DPMix where
   cpretty dpmix = cd <$> vd where
