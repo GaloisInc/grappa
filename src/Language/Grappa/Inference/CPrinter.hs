@@ -107,7 +107,14 @@ cprettyDistFun fn ts da@(TupleDist ds) =
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
      (vcat $ mkBodyT fn ts ds)])
 -- FINISH:
-cprettyDistFun _ _ (FixedListDist _ _) = error "FINISH.FixedListDist"
+-- double pdf_<fn>(TO x0, ..., union value *tup) {
+--     double acc = 0;
+--     int i;
+--     for (i = 0; i < <c>; ++i) {
+--         acc += pdf_<fn>_0(x0, ... x<c-1>, PROJ(tup, i));
+--     }
+-- }
+cprettyDistFun fn ts (FixedListDist c d) = error "FINISH.FixedListDist"
 cprettyDistFun _ _ (VarListDist _) = error "FINISH.VarListDist"
 
 -- type, name, initializer
@@ -158,13 +165,19 @@ mkBodyT fn ts ds =
   map (\(d,i) ->
        mkVarDecl (distType d) ("x" ++ show (length ts + i))
        (Just $
-        valueArrayProj (NamedVarExpr "tup") (LitExpr $ IntLit i)
-        (distType d)))
+        valueArrayProj
+         (NamedVarExpr "tup")
+         (LitExpr $ IntLit i)
+         (distType d)))
       (zip ds [0..])
   ++ [mkReturn $ cpretty $ sum $
       map (\i -> FunCallExpr ("pdf_" ++ mkExtFunc fn i)
                  (map (VarExpr . VarName) [0..(length ts + i)]))
       [0..(length ds - 1)]]
+
+-- fn name, types, dists
+mkBodyF :: String -> [CType] -> [Dist] -> Doc
+mkBodyF fn ts d = error "FINISH.mkBodyF"
 
 instance CPretty DPMix where
   cpretty dpmix = cd <$> vd where
