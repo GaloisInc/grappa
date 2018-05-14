@@ -82,7 +82,6 @@ instance CPretty Dist where
   cpretty (IntDist e _) = (cpretty e)
   cpretty (TupleDist ds) =
     cat $ punctuate (space <> (char '+') <> space) (map cpretty ds)
-  -- FINISH:
   cpretty (FixedListDist c d) = (int c) <+> cpretty d
   cpretty (VarListDist d) = cpretty d
 
@@ -106,15 +105,13 @@ cprettyDistFun fn ts da@(TupleDist ds) =
      fn
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
      (vcat $ mkBodyT fn ts ds)])
--- FINISH:
+-- FINISH ⬇
 -- double pdf_<fn>(TO x0, ..., union value *tup) {
---     double acc = 0;
---     int i;
---     for (i = 0; i < <c>; ++i) {
---         acc += pdf_<fn>_0(x0, ... x<c-1>, PROJ(tup, i));
---     }
--- }
-cprettyDistFun fn ts (FixedListDist c d) = error "FINISH.FixedListDist"
+cprettyDistFun fn ts da@(FixedListDist c d) =
+    mkDistFunc
+     fn
+     (varDecls (zip varNames ts ++ [("tup", distType da)]))
+     (vcat $ mkBodyF fn ts d)
 cprettyDistFun _ _ (VarListDist _) = error "FINISH.VarListDist"
 
 -- type, name, initializer
@@ -159,6 +156,7 @@ mkRefdDists fn ts ds =
                   d)
       (zip ds [0..])
 
+-- tuple dist body
 -- fn name, types, dists
 mkBodyT :: String -> [CType] -> [Dist] -> [Doc]
 mkBodyT fn ts ds =
@@ -175,9 +173,18 @@ mkBodyT fn ts ds =
                  (map (VarExpr . VarName) [0..(length ts + i)]))
       [0..(length ds - 1)]]
 
--- fn name, types, dists
-mkBodyF :: String -> [CType] -> [Dist] -> Doc
-mkBodyF fn ts d = error "FINISH.mkBodyF"
+-- fixed-list dist body
+-- fn name, types, dist
+mkBodyF :: String -> [CType] -> Dist -> [Doc]
+-- FINISH ⬇
+mkBodyF fn ts d =
+  [
+  text "double accum = 0;" <$> text "int i;" <$>
+  text "for (i = 0; i < LEN; ++i) {" <$>
+  indent 4 (text "accum += pdf_XXX_0(...);") <$>
+  text "}" <$>
+  text "return accum;"
+  ]
 
 instance CPretty DPMix where
   cpretty dpmix = cd <$> vd where
