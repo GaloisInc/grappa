@@ -105,7 +105,7 @@ cprettyDistFun fn ts da@(TupleDist ds) =
      fn
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
      (vcat $ mkBodyT fn ts ds)])
-cprettyDistFun fn ts da@(FixedListDist c d) =
+cprettyDistFun fn ts da@(FixedListDist _ d) =
   vcat
    (mkRefdDists fn ts [d]
     ++
@@ -163,11 +163,11 @@ mkBodyT :: String -> [CType] -> [Dist] -> [Doc]
 mkBodyT fn ts ds =
   map (\(d,i) ->
        mkVarDecl (distType d) ("x" ++ show (length ts + i))
-       (Just $
-        valueArrayProj
-         (NamedVarExpr "tup")
-         (LitExpr $ IntLit i)
-         (distType d)))
+        (Just $
+         valueArrayProj
+          (NamedVarExpr "tup")
+          (LitExpr $ IntLit i)
+          (distType d)))
       (zip ds [0..])
   ++ [mkReturn $ cpretty $ sum $
       map (\i -> FunCallExpr ("pdf_" ++ mkExtFunc fn i)
@@ -177,12 +177,22 @@ mkBodyT fn ts ds =
 -- fixed-list dist body
 -- fn name, types, dist
 mkBodyF :: String -> [CType] -> Dist -> [Doc]
-mkBodyF fn ts d =
+mkBodyF fn ts d=
   [
   text "double accum = 0;" <$> text "int i;" <$>
   text "for (i = 0; i < " <> text (show $ length ts) <> text "; ++i) {" <$>
-  -- FINISH ⬇: formal parms
-  indent 4 (text "accum += pdf_" <> text fn <> text "_0(...);") <$>
+  indent 4 (text "accum += pdf_" <> text fn <> text "_0" <>
+   ((encloseSep lparen rparen (comma <> space)
+     ((mkDecls $ zip varNames ts)
+      <>
+      (map (\i ->
+             valueArrayProj
+              (NamedVarExpr "tup")
+              (LitExpr $ IntLit i)
+              (distType d))
+          [0..(length ts)]
+      )))
+   )) <> text";" <$>
   text "}" <$>
   text "return accum;"
   ]
