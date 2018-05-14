@@ -105,13 +105,14 @@ cprettyDistFun fn ts da@(TupleDist ds) =
      fn
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
      (vcat $ mkBodyT fn ts ds)])
--- FINISH ⬇
--- double pdf_<fn>(TO x0, ..., union value *tup) {
 cprettyDistFun fn ts da@(FixedListDist c d) =
-    mkDistFunc
+  vcat
+   (mkRefdDists fn ts [d]
+    ++
+    [mkDistFunc
      fn
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
-     (vcat $ mkBodyF fn ts d)
+     (vcat $ mkBodyF fn ts d)])
 cprettyDistFun _ _ (VarListDist _) = error "FINISH.VarListDist"
 
 -- type, name, initializer
@@ -176,12 +177,12 @@ mkBodyT fn ts ds =
 -- fixed-list dist body
 -- fn name, types, dist
 mkBodyF :: String -> [CType] -> Dist -> [Doc]
--- FINISH ⬇
 mkBodyF fn ts d =
   [
   text "double accum = 0;" <$> text "int i;" <$>
-  text "for (i = 0; i < LEN; ++i) {" <$>
-  indent 4 (text "accum += pdf_XXX_0(...);") <$>
+  text "for (i = 0; i < " <> text (show $ length ts) <> text "; ++i) {" <$>
+  -- FINISH ⬇: formal parms
+  indent 4 (text "accum += pdf_" <> text fn <> text "_0(...);") <$>
   text "}" <$>
   text "return accum;"
   ]
