@@ -105,14 +105,14 @@ cprettyDistFun fn ts da@(TupleDist ds) =
      fn
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
      (vcat $ mkBodyT fn ts ds)])
-cprettyDistFun fn ts da@(FixedListDist _ d) =
+cprettyDistFun fn ts da@(FixedListDist c d) =
   vcat
    (mkRefdDists fn ts [d]
     ++
     [mkDistFunc
      fn
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
-     (vcat $ mkBodyF fn ts d)])
+     (vcat $ mkBodyF ts c d)])
 cprettyDistFun _ _ (VarListDist _) = error "FINISH.VarListDist"
 
 -- type, name, initializer
@@ -140,7 +140,7 @@ varDecls ds = encloseSep lparen rparen (comma <> space) (mkDecls ds)
 mkDecls :: [(String,CType)] -> [Doc]
 mkDecls ds = map (\t -> (cpretty $ snd t) <+> text (fst t)) ds
 
--- pred types, last type, name prefix
+-- pred types, last type, name prefix [WTF?!]
 varNames :: [String]
 varNames = map (\i -> "x" ++ show (i :: Int)) [0..]
 
@@ -175,24 +175,26 @@ mkBodyT fn ts ds =
       [0..(length ds - 1)]]
 
 -- fixed-list dist body
--- fn name, types, dist
-mkBodyF :: String -> [CType] -> Dist -> [Doc]
-mkBodyF fn ts d=
+-- fn name, types, count, dist
+mkBodyF :: [CType] -> Int -> Dist -> [Doc]
+mkBodyF ts c d =
   [
-  text "double accum = 0;" <$> text "int i;" <$>
-  text "for (i = 0; i < " <> text (show $ length ts) <> text "; ++i) {" <$>
-  indent 4 (text "accum += pdf_" <> text fn <> text "_0" <>
-   ((encloseSep lparen rparen (comma <> space)
-     ((mkDecls $ zip varNames ts)
-      <>
-      (map (\i ->
+  text "double accum =" <+> (
+    cat $
+    map (\i ->
              valueArrayProj
-              (NamedVarExpr "tup")
+              (NamedVarExpr ("x" ++ (show i)))
               (LitExpr $ IntLit i)
               (distType d))
-          [0..(length ts)]
-      )))
-   )) <> text";" <$>
+        [0..(length ts - 1)]
+  ) <+> text ";" <$>
+  text "for (i = 0; i < " <> text (show c) <> text "; ++i) {" <$>
+  indent 4 (text "accum +=" <+>
+             valueArrayProj
+              (NamedVarExpr "tup")
+              (NamedVarExpr "i")
+              (distType d)
+           ) <> text";" <$>
   text "}" <$>
   text "return accum;"
   ]
