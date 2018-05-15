@@ -62,7 +62,8 @@ instance CPretty CExpr where
     valueArrayProj e (LitExpr $ IntLit $ sum(map size $ take i ts)) (ts !! i)
   cpretty (FixedListProjExpr t elist eix) =
     valueArrayProj elist (eix * LitExpr (IntLit (size t))) t
-  cpretty (VarListProjExpr _ _ _) = error "FINISH.VarListProjExpr"
+  cpretty (VarListProjExpr t elist eix) =
+    valueArrayProj elist (eix * LitExpr (IntLit (size t))) t
 
 -- tuple, offset, dist type
 valueArrayProj :: CExpr -> CExpr -> CType -> Doc
@@ -113,7 +114,14 @@ cprettyDistFun fn ts da@(FixedListDist c d) =
      fn
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
      (vcat $ mkBodyF ts c d)])
-cprettyDistFun _ _ (VarListDist _) = error "FINISH.VarListDist"
+cprettyDistFun fn ts da@(VarListDist d) =
+  vcat
+   (mkRefdDists fn ts [d]
+    ++
+    [mkDistFunc
+     fn
+     (varDecls (zip varNames ts ++ [("tup", distType da)]))
+     (vcat $ mkBodyV ts d)])
 
 -- type, name, initializer
 mkVarDecl :: CType -> String -> Maybe Doc -> Doc
@@ -187,6 +195,30 @@ mkBodyF ts c d =
         [0..(length ts - 1)]
   ) <+> text ";" <$>
   text "for (i = 0; i < " <> text (show c) <> text "; ++i) {" <$>
+  indent 4 (text "accum +=" <+>
+             valueArrayProj
+              (NamedVarExpr "tup")
+              (NamedVarExpr "i")
+              (distType d)
+           ) <> text";" <$>
+  text "}" <$>
+  text "return accum;"
+  ]
+
+-- ancestor types, count, dist
+mkBodyV :: [CType] -> Dist -> [Doc]
+mkBodyV ts d =
+  [
+  text "double accum =" <+> (
+    cat $
+    map (\i ->
+         valueArrayProj
+          (NamedVarExpr ("x" ++ (show i)))
+          (LitExpr $ IntLit i)
+          (distType d))
+        [0..(length ts - 1)]
+  ) <+> text ";" <$>
+  text "for (i = 0; i < tup->var_array_value.length; ++i) {" <$>
   indent 4 (text "accum +=" <+>
              valueArrayProj
               (NamedVarExpr "tup")
