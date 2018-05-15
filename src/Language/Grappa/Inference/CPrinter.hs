@@ -92,12 +92,12 @@ cprettyDistFun fn ts (DoubleDist d _) =
   mkDistFunc
    fn
    (varDecls $ zip varNames (ts ++ [DoubleType]))
-   (mkReturn $ cpretty d)
+   (vcat $ [text "/* double dist */"] ++ [mkReturn $ cpretty d])
 cprettyDistFun fn ts (IntDist d _) =
   mkDistFunc
    fn
    (varDecls $ zip varNames (ts ++ [IntType]))
-   (mkReturn $ cpretty d)
+   (vcat $ [text "/* int dist */"] ++ [mkReturn $ cpretty d])
 cprettyDistFun fn ts da@(TupleDist ds) =
   vcat
    (mkRefdDists fn ts ds
@@ -105,7 +105,7 @@ cprettyDistFun fn ts da@(TupleDist ds) =
     [mkDistFunc
      fn
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
-     (vcat $ mkBodyT fn ts ds)])
+     (vcat $ [text "/* tuple dist */"] ++ mkBodyT fn ts ds)])
 cprettyDistFun fn ts da@(FixedListDist c d) =
   vcat
    (mkRefdDists fn ts [d]
@@ -113,7 +113,7 @@ cprettyDistFun fn ts da@(FixedListDist c d) =
     [mkDistFunc
      fn
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
-     (vcat $ mkBodyF ts c d)])
+     (vcat $ [text "/* fixed-list dist */"] ++ mkBodyF ts c d)])
 cprettyDistFun fn ts da@(VarListDist d) =
   vcat
    (mkRefdDists fn ts [d]
@@ -121,7 +121,7 @@ cprettyDistFun fn ts da@(VarListDist d) =
     [mkDistFunc
      fn
      (varDecls (zip varNames ts ++ [("tup", distType da)]))
-     (vcat $ mkBodyV ts d)])
+     (vcat $ [text "/* variable-list dist */"] ++ mkBodyV ts d)])
 
 -- type, name, initializer
 mkVarDecl :: CType -> String -> Maybe Doc -> Doc
