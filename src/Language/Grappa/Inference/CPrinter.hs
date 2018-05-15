@@ -124,7 +124,7 @@ mkVarDecl t n Nothing = (cpretty t) <+> text n <> semi
 mkDistFunc :: String -> Doc -> Doc -> Doc
 mkDistFunc f ds b = (text "double") <+> text("pdf_" ++ f) <+> ds <+> mkBody b
 
--- body
+-- body doc
 mkBody :: Doc -> Doc
 mkBody b = lbrace <$> (indent 4 b) <$> rbrace <> line
 
@@ -140,11 +140,11 @@ varDecls ds = encloseSep lparen rparen (comma <> space) (mkDecls ds)
 mkDecls :: [(String,CType)] -> [Doc]
 mkDecls ds = map (\t -> (cpretty $ snd t) <+> text (fst t)) ds
 
--- pred types, last type, name prefix [WTF?!]
+-- <niladic>
 varNames :: [String]
 varNames = map (\i -> "x" ++ show (i :: Int)) [0..]
 
--- expr
+-- expr doc
 mkReturn :: Doc -> Doc
 mkReturn d = text "return" <+> align(d <> semi)
 
@@ -157,7 +157,6 @@ mkRefdDists fn ts ds =
                   d)
       (zip ds [0..])
 
--- tuple dist body
 -- fn name, types, dists
 mkBodyT :: String -> [CType] -> [Dist] -> [Doc]
 mkBodyT fn ts ds =
@@ -174,7 +173,6 @@ mkBodyT fn ts ds =
                  (map (VarExpr . VarName) [0..(length ts + i)]))
       [0..(length ds - 1)]]
 
--- fixed-list dist body
 -- fn name, types, count, dist
 mkBodyF :: [CType] -> Int -> Dist -> [Doc]
 mkBodyF ts c d =
@@ -182,10 +180,10 @@ mkBodyF ts c d =
   text "double accum =" <+> (
     cat $
     map (\i ->
-             valueArrayProj
-              (NamedVarExpr ("x" ++ (show i)))
-              (LitExpr $ IntLit i)
-              (distType d))
+         valueArrayProj
+          (NamedVarExpr ("x" ++ (show i)))
+          (LitExpr $ IntLit i)
+          (distType d))
         [0..(length ts - 1)]
   ) <+> text ";" <$>
   text "for (i = 0; i < " <> text (show c) <> text "; ++i) {" <$>
