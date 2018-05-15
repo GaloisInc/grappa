@@ -148,7 +148,7 @@ varNames = map (\i -> "x" ++ show (i :: Int)) [0..]
 mkReturn :: Doc -> Doc
 mkReturn d = text "return" <+> align(d <> semi)
 
--- fn basename, types, dists
+-- fn basename, ancestor types, dists
 mkRefdDists :: String -> [CType] -> [Dist] -> [Doc]
 mkRefdDists fn ts ds =
   map (\(d,i) -> cprettyDistFun
@@ -157,7 +157,7 @@ mkRefdDists fn ts ds =
                   d)
       (zip ds [0..])
 
--- fn name, types, dists
+-- fn name, ancestor types, dists
 mkBodyT :: String -> [CType] -> [Dist] -> [Doc]
 mkBodyT fn ts ds =
   map (\(d,i) ->
@@ -173,7 +173,7 @@ mkBodyT fn ts ds =
                  (map (VarExpr . VarName) [0..(length ts + i)]))
       [0..(length ds - 1)]]
 
--- fn name, types, count, dist
+-- ancestor types, count, dist
 mkBodyF :: [CType] -> Int -> Dist -> [Doc]
 mkBodyF ts c d =
   [
