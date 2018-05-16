@@ -218,12 +218,17 @@ mkBodyV ts d =
           (distType d))
         [0..(length ts - 1)]
   ) <+> text ";" <$>
-  text "for (i = 0; i < tup->var_array_value.length; ++i) {" <$>
+  text "for (i = 0; i < tup[0].var_array_value.length; ++i) {" <$>
   indent 4 (text "accum +=" <+>
              valueArrayProj
               (NamedVarExpr "tup")
+              (NamedVarExpr "0")
+              (VarListType (distType d)) <>
+             text "." <>
+             valueArrayProj
+              (NamedVarExpr "elems")
               (NamedVarExpr "i")
-              (distType d)
+              (distType d) <> text";"
            ) <> text";" <$>
   text "}" <$>
   text "return accum;"
