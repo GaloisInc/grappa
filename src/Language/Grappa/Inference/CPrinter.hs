@@ -27,7 +27,7 @@ instance CPretty VarName where
   cpretty (VarName n) = text $ "x" <> show n
 
 instance CPretty UnaryOp where
-  cpretty NegateOp = char '~'
+  cpretty NegateOp = char '-'
   cpretty NotOp = char '!'
 
 instance CPretty BinaryOp where
