@@ -218,13 +218,9 @@ mkBodyV ts d =
           (distType d))
         [0..(length ts - 1)]
   ) <+> text ";" <$>
-  text "for (i = 0; i < tup[0].var_array_value.length; ++i) {" <$>
-  indent 4 (text "accum +=" <+>
-             valueArrayProj
-              (NamedVarExpr "tup")
-              (NamedVarExpr "0")
-              (VarListType (distType d)) <>
-             text "." <>
+  text "int i;" <$>
+  text "for (i = 0; i < tup->length; ++i) {" <$>
+  indent 4 (text "accum += tup->" <>
              valueArrayProj
               (NamedVarExpr "elems")
               (NamedVarExpr "i")
@@ -234,8 +230,18 @@ mkBodyV ts d =
   text "return accum;"
   ]
 
+mkCfileHeader :: Doc
+mkCfileHeader =
+  text "#include <math.h>" <$>
+  text "#include \"datatypes.h\"" <$>
+  empty <$>
+  text "const double pi = M_PI;" <$>
+  text "const double e = M_E;" <$>
+  empty
+
 instance CPretty DPMix where
-  cpretty dpmix = cd <$> vd where
+  cpretty dpmix = header <$> cd <$> vd where
+    header = mkCfileHeader
     cd = cprettyDistFun "cluster" [] (clusterDist dpmix)
     vd = cprettyDistFun "values"
                         [distType $ clusterDist dpmix]
