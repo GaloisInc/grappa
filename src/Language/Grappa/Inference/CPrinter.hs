@@ -194,6 +194,7 @@ mkBodyF ts c d =
           (distType d))
         [0..(length ts - 1)]
   ) <+> text ";" <$>
+  text "int i;" <$>
   text "for (i = 0; i < " <> text (show c) <> text "; ++i) {" <$>
   indent 4 (text "accum +=" <+>
              valueArrayProj
