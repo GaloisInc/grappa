@@ -1,3 +1,4 @@
+
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE GADTs #-}
@@ -680,6 +681,11 @@ class ValidExprRepr repr => Interp__adtDist__ListF repr where
     (Prob -> Dist (GTuple '[]) -> Prob -> Dist (GTuple '[a, GList a]) ->
      Dist (GList a))
 
+class ValidExprRepr repr => Interp__list_iid repr where
+  interp__list_iid :: GExpr repr (Dist a -> Dist (GList a))
+
+-- class ValidExprRepr repr => Interp__vec_iid repr where
+--   interp__vec_iid :: GExpr repr (Int -> Dist a -> Dist (Vec a))
 
 ----------------------------------------------------------------------
 -- * Interpreting vectors and matrices

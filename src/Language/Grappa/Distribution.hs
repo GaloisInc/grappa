@@ -36,6 +36,8 @@ type R = Double
 newtype RMatrix = RMatrix { unRMatrix :: M.Matrix Double }
                   deriving (Num,Eq)
 
+-- | Grappa type for vectors
+-- data Vec a
 
 ----------------------------------------------------------------------
 -- * Supporting the Gamma and Beta Functions
@@ -50,7 +52,7 @@ instance HasGamma Double where
 
 
 ----------------------------------------------------------------------
--- * Helper Definitions for Automatic Differatiation
+-- * Helper Definitions for Automatic Differentiation
 ----------------------------------------------------------------------
 
 -- | Convert between two 'AD.Forward' types, using a conversion function which

@@ -26,6 +26,7 @@ import qualified Text.PrettyPrint.ANSI.Leijen as PP
 
 import System.IO
 import Control.Monad.IO.Class
+import Control.Monad.State
 
 import Language.Grappa.GrappaInternals
 import Language.Grappa.Frontend.DataSource
@@ -38,12 +39,15 @@ import Language.Grappa.Interp.SupplyJointM
 import Language.Grappa.Interp.InitSupply
 import Language.Grappa.Interp.UntypedAST
 import Language.Grappa.Interp.BayesNet
+import Language.Grappa.Interp.CRepr
+import Language.Grappa.Interp.CExprGADT
 import Language.Grappa.Rand.MWCRandM
 
 import Language.Grappa.Inference.Util
 import Language.Grappa.Inference.HMC
 import Language.Grappa.Inference.GradientDescent
 import Language.Grappa.Inference.BayesNetInference
+import Language.Grappa.Inference.CTranslate
 
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector as V
@@ -316,6 +320,20 @@ pythonMethod = InferenceMethod
   , imModelCopies = 1
   }
 
+runCDPM :: HasCType a => Source a -> GExpr CRepr (Dist a) -> IO ()
+runCDPM _ (GExpr d) =
+  let d' = evalState (projCDist d (cType, 0)) 0 in
+    renderCDist d' >> putStrLn ""
+
+cdpmMethod :: InferenceMethod
+cdpmMethod = InferenceMethod
+  { imName = "cdpm"
+  , imDescription = "C Dirichlet Process Mixture Model"
+  , imParams = []
+  , imRunFunc = 'runCDPM
+  , imModelCopies = 1
+  }
+
 allMethods :: [InferenceMethod]
 allMethods =
   [ priorMethod
@@ -325,6 +343,7 @@ allMethods =
   , bpNutsMethod
   , gradientDescentMethod
   , pythonMethod
+  , cdpmMethod
   ]
 
 findMethod :: Text -> Maybe InferenceMethod

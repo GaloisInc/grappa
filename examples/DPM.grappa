@@ -1,0 +1,50 @@
+
+-- model dpm_test mu sigma { x, y, z, w } =
+--   x ~ normal mu sigma
+--   y ~ normal x sigma
+--   z ~ uniform (min x y) (max x y)
+--   w ~ normal (cos z) (log x)
+
+-- model dpm_test2_aux mu sigma { x, y } =
+--   x ~ normal mu sigma
+--   y ~ normal x (exp sigma)
+
+-- model dpm_test2 mu sigma { x, y } =
+--   x ~ dpm_test2_aux mu sigma
+--   y ~ dpm_test2_aux mu sigma
+
+-- model dpm_test mu sigma { w } =
+--   x ~ normal mu sigma
+--   y ~ normal x sigma
+--   z ~ uniform (min x y) (max x y)
+--   w ~ normal (cos z) (log x)
+
+-- model simple x y { z } =
+--   z ~ normal x y
+
+fun fst (x, y) = x
+fun snd (x, y) = y
+
+model tuple_test x { y, z } =
+  y ~ normal x 1
+  z ~ normal y x
+
+model list_test x { ys } =
+  -- ys ~ list_iid (normal x 1)
+  ys ~ list_iid (tuple_test x)
+
+model all_test x { y, z, w } =
+  y ~ tuple_test x
+  z ~ list_test (snd y)
+  w ~ tuple_test x
+
+
+main =
+  -- _ ~ simple 0 1
+  -- _ ~ dpm_test 0 1
+  -- _ ~ dpm_test2 0 1
+  -- _ ~ vec_test 0
+  -- _ ~ list_test 0
+
+  _ ~ all_test 1.23
+  using cdpm ()

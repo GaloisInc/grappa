@@ -108,6 +108,8 @@ library
                      , Language.Grappa.Interp.FunRepr
                      , Language.Grappa.Interp.TypedExpr
                      , Language.Grappa.Interp.CExpr
+                     , Language.Grappa.Interp.CExprGADT
+                     , Language.Grappa.Interp.CRepr
 
                      -- Inference methods
                      , Language.Grappa.Inference
@@ -123,6 +125,7 @@ library
                      -- , Language.Grappa.Inference.Reparameterize
                      , Language.Grappa.Inference.BayesNetInference
                      , Language.Grappa.Inference.CPrinter
+                     , Language.Grappa.Inference.CTranslate
 
                      -- Examples
                      -- , Language.Grappa.Examples
@@ -169,6 +172,8 @@ library
                      , pretty-show
                      , math-functions
                      , directory
+                     , language-c
+                     , pretty
 
   -- This flag depends on the @variational-inference@ flag, which is
   -- handled automatically below.

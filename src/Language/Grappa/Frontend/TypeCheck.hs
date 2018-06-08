@@ -307,13 +307,13 @@ ensureTypeHasLitEq (IntegerLit _) tp = do
   ensureNamedConstr ''Eq tp
   ensureNumTp tp
   ensureNamedInterpConstr ''Interp__'integer [tp]
-  ensureNamedInterpConstr ''Interp__'eqInteger [tp]
+  -- ensureNamedInterpConstr ''Interp__'eqInteger [tp]
   ensureClassConstr (InterpConstr (ConstrInfo ''Interp__'ifThenElse) [])
 ensureTypeHasLitEq (RationalLit _) tp = do
   ensureNamedConstr ''Eq tp
   ensureFractionalTp tp
   ensureNamedInterpConstr ''Interp__'rational [tp]
-  ensureNamedInterpConstr ''Interp__'eqRational [tp]
+  -- ensureNamedInterpConstr ''Interp__'eqRational [tp]
   ensureClassConstr (InterpConstr (ConstrInfo ''Interp__'ifThenElse) [])
 
 -- -- | Ensure that the given type supports the 'Eq' typeclass
