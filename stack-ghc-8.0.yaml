@@ -49,14 +49,8 @@ packages:
 extra-deps:
 - alex-tools-0.3
 - text-1.2.2.1
-- algebraic-classes-0.7
-- constraints-0.6
-- free-functors-0.7
-- syb-0.4.4
-- located-0.1.1.0
 - microtimer-0.0.1.2
 - layout-rules-0.1.0.1
-- FixedPoint-simple-0.6.1
 
 # Override default flag values for local packages and extra-deps
 flags: {}
