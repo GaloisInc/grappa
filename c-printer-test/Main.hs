@@ -38,10 +38,22 @@ testDPMix :: DPMix
 testDPMix =
   DPMix
   { clusterDist =
+      -- Grappa model:
+      -- clusterDist {x,y} =
+      --   x ~ uniform 0 100
+      --   y ~ uniform 0 100
+      --
       -- double cluster_pdf(union value *x0)
       TupleDist [uniformDist (VarName 0) 0 100
                 ,uniformDist (VarName 1) 0 100]
   , valuesDist =
+      -- Grappa model:
+      -- valuesDist xy { z1, z2, z3, z4 } =
+      --   z1 ~ uniform 0 xy.0
+      --   z2 ~ uniform 0 xy.1
+      --   z3 ~ normal xy.0 1
+      --   z4 ~ normal xy.1 1
+      --
       -- double value_pdf(union value *x0, union value *x1)
     TupleDist
     [uniformDist (VarName 1) 0 (TupleProjExpr [DoubleType, DoubleType] (VarExpr (VarName 0)) 0),
