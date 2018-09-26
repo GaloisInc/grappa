@@ -28,15 +28,15 @@ flag show-splices
   default: True
 
 
-executable grappa
-  default-language: Haskell2010
-  hs-source-dirs: grappa
-  main-is: Main.hs
-  ghc-options: -O2 -threaded -Wall
-  build-depends: base
-               , filepath
-               , directory
-               , process
+-- executable grappa
+--   default-language: Haskell2010
+--   hs-source-dirs: grappa
+--   main-is: Main.hs
+--   ghc-options: -O2 -threaded -Wall
+--   build-depends: base
+--                , filepath
+--                , directory
+--                , process
 
 executable grappa-c
   default-language: Haskell2010
