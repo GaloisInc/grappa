@@ -98,7 +98,7 @@ library
                      , Language.Grappa.Interp.ProductRepr
                      , Language.Grappa.Interp.FunRepr
                      , Language.Grappa.Interp.TypedExpr
-                     , Language.Grappa.Interp.CExprGADT
+                     , Language.Grappa.Interp.CExpr
                      , Language.Grappa.Interp.CRepr
 
                      -- Inference methods

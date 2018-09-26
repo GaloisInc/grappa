@@ -3,7 +3,7 @@
 {-# LANGUAGE DeriveAnyClass, StandaloneDeriving #-}
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
-module Language.Grappa.Interp.CExprGADT where
+module Language.Grappa.Interp.CExpr where
 
 import           Data.Type.Equality
 import qualified Numeric.Log as Log

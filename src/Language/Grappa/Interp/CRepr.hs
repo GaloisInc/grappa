@@ -12,7 +12,7 @@ import qualified Numeric.Log as Log
 import           Language.Grappa.Distribution
 import           Language.Grappa.Interp
 import           Language.Grappa.GrappaInternals
-import           Language.Grappa.Interp.CExprGADT
+import           Language.Grappa.Interp.CExpr
 
 
 -- | The type tag for the C representation.

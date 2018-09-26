@@ -40,7 +40,7 @@ import Language.Grappa.Interp.InitSupply
 import Language.Grappa.Interp.UntypedAST
 import Language.Grappa.Interp.BayesNet
 import Language.Grappa.Interp.CRepr
-import Language.Grappa.Interp.CExprGADT
+import Language.Grappa.Interp.CExpr
 import Language.Grappa.Rand.MWCRandM
 
 import Language.Grappa.Inference.Util

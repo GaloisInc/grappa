@@ -14,7 +14,7 @@ import           Language.C.Syntax.Constants
 import           Text.PrettyPrint.HughesPJ
 
 import           Language.Grappa.GrappaInternals
-import           Language.Grappa.Interp.CExprGADT
+import           Language.Grappa.Interp.CExpr
 
 
 -- The pretty-printer instances for CExpressions, etc. are defined
