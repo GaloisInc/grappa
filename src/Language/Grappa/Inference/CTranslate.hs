@@ -95,12 +95,12 @@ transCDynExpr (UnaryExpr unop e) =
 transCDynExpr (BinaryExpr _ binop e1 e2) =
   CBinary (transBinaryOp binop) (transCDynExpr e1) (transCDynExpr e2) nil
 transCDynExpr (FunCallExpr fName _ _ args) =
-  CCall (mkVar fName) (mapListToList (transCDynExpr) args) nil
+  CCall (mkVar fName) (hListToList (transCDynExpr) args) nil
 transCDynExpr (NamedVarExpr _ nm) = mkVar nm
 transCDynExpr (CondExpr b e1 e2) =
   CCond (transCDynExpr b) (Just $ transCDynExpr e1) (transCDynExpr e2) nil
 transCDynExpr (TupleProjExpr ts elemPf tup) =
-  tupleProj (SomeCType (cTypesElem ts elemPf))
+  tupleProj (SomeCType (projectHList ts elemPf))
   (intConst $ typeListElemToInt elemPf) (transCDynExpr tup)
 
 intConst :: Int -> CExpr
@@ -141,7 +141,7 @@ varIdents = map (\i -> stringIdent $ "x" ++ show (i :: Int)) [0..]
 -- either single word values or pointers. The only interesting case is
 -- the tuple, which is stored as an array in-place.
 cTypeSize :: CType a -> Int
-cTypeSize (TupleType ts) = foldMapList (\x acc -> cTypeSize x + acc) ts 0
+cTypeSize (TupleType ts) = foldHList (\x acc -> cTypeSize x + acc) ts 0
 cTypeSize _ = 1
 
 someCTypeSize :: SomeCType -> Int
@@ -149,9 +149,9 @@ someCTypeSize (SomeCType t) = cTypeSize t
 
 -- Compute the actual offset into a tuple from an index value.
 tupleOffset :: CTypes as -> Int -> Int
-tupleOffset MapListNil _         = error "tupleOffset: empty MapList"
-tupleOffset (MapListCons _ _) 0  = 0
-tupleOffset (MapListCons t ts) i = cTypeSize t + tupleOffset ts (i-1)
+tupleOffset HListNil _         = error "tupleOffset: empty HList"
+tupleOffset (HListCons _ _) 0  = 0
+tupleOffset (HListCons t ts) i = cTypeSize t + tupleOffset ts (i-1)
 
 -- Produce a PDF function for a given distribution. It may be
 -- comprised of multiple constituent distributions, so we recursively
@@ -162,10 +162,10 @@ tupleOffset (MapListCons t ts) i = cTypeSize t + tupleOffset ts (i-1)
 mkPdf :: [SomeCType] -> FunName -> SomeCDist -> [CFunDef]
 mkPdf tys nm (SomeCDist (TupleDist ds)) =
   let
-    distTypes = mapListToList (SomeCType . cDistType) ds
+    distTypes = hListToList (SomeCType . cDistType) ds
     funs      = concat $ zipWith (\d i -> mkPdf (tys ++ take i distTypes)
                                    (nm ++ "_" ++ show i) d)
-                (someCDists' ds) [0..]
+                (cDistsToList ds) [0..]
     paramDecls = mkParamDecls $ zip varIdents tys ++
                  [(stringIdent "tup", SomeCType $ cDistType $ TupleDist ds)]
     localDecls = mkInitDecls $ zip3 (drop (length tys) varIdents) distTypes
@@ -210,7 +210,7 @@ mkPdf tys nm (SomeCDist d) =
   [mkFun (stringIdent nm)
    (mkParamDecls $ zip varIdents (tys ++ [SomeCType $ cDistType d]))
     (CCompound []
-     [CBlockStmt $ CReturn (Just $ transCDynExpr $ cDistExpr d) nil]
+     [CBlockStmt $ CReturn (Just $ transCDynExpr $ cDistPDFExpr d) nil]
      nil)]
 
 -- counter identifier, increment, upper bound, body

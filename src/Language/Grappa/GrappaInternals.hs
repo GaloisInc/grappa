@@ -238,6 +238,86 @@ instance ShowADT adt => Show (ADT adt) where
 
 
 --
+-- * Heterogeneous Lists
+--
+
+-- | An @'HList' f [t0, t1, ..., tn]@ is a heterogeneous list of elements of
+-- type @f t0@, @f t1@, etc.
+data HList (f :: * -> *) (ts  :: [*]) where
+  HListNil  :: HList f '[]
+  HListCons :: f a -> HList f as -> HList f (a ': as)
+
+-- | Convert a Grappa tuple to an 'HList'
+tupleToHList :: TupleF ts f r -> HList f ts
+tupleToHList Tuple0 = HListNil
+tupleToHList tup@(Tuple1 _)           = consTupleToHList tup
+tupleToHList tup@(Tuple2 _ _)         = consTupleToHList tup
+tupleToHList tup@(Tuple3 _ _ _)       = consTupleToHList tup
+tupleToHList tup@(Tuple4 _ _ _ _)     = consTupleToHList tup
+tupleToHList tup@(TupleN _ _ _ _ _ _) = consTupleToHList tup
+
+-- | Helper for 'tupleToHList'
+consTupleToHList :: TupleF (t ': ts) f r -> HList f (t ': ts)
+consTupleToHList tup =
+  HListCons (tupleHead tup) (tupleToHList (tupleTail tup))
+
+-- | Convert an 'HList' to a Grappa tuple
+hListToTuple :: HList f ts -> TupleF ts f r
+hListToTuple HListNil = Tuple0
+hListToTuple (HListCons x xs) = tupleCons x (hListToTuple xs)
+
+-- | Convert an 'HList' to a monomorphic list
+hListToList :: (forall a. f a -> b) -> HList f ts -> [b]
+hListToList _ HListNil = []
+hListToList g (HListCons x xs) = g x : hListToList g xs
+
+-- | Map a function over an 'HList'
+mapHList :: (forall a. f a -> g a) -> HList f as -> HList g as
+mapHList _ HListNil = HListNil
+mapHList f (HListCons a as) = HListCons (f a) (mapHList f as)
+
+-- | Traverse an 'HList'
+traverseHList :: Applicative m => (forall a. f a -> m (g a)) ->
+                 HList f ts -> m (HList g ts)
+traverseHList _ HListNil = pure HListNil
+traverseHList f (HListCons x xs) =
+  pure HListCons <*> f x <*> traverseHList f xs
+
+-- | Traverse an 'HList' in a monomorphic way
+traverseHList' :: Applicative m => (forall a. f a -> m b) -> HList f ts -> m [b]
+traverseHList' _ HListNil         = pure []
+traverseHList' f (HListCons x xs) =
+  pure (:) <*> f x <*> traverseHList' f xs
+
+-- | Fold an 'HList' in a monomorphic way
+foldHList :: (forall a. f a -> b -> b) -> HList f ts -> b -> b
+foldHList _ HListNil acc         = acc
+foldHList g (HListCons x xs) acc = g x $ foldHList g xs acc
+
+-- | Compute the length of an 'HList'
+hListLength :: HList f ts -> Int
+hListLength l = foldHList (const (+ 1)) l 0
+
+-- | Build an 'HList' of 'TypeListElem' proofs that each type in @as@ is an
+-- element of @as@
+buildHListElems :: HList f as -> HList (TypeListElem as) as
+buildHListElems HListNil = HListNil
+buildHListElems (HListCons _ rest) =
+  HListCons TypeListElem_Base (mapHList TypeListElem_Cons
+                               (buildHListElems rest))
+
+{-
+type family Concat (l1 :: [*]) (l2 :: [*]) where
+  Concat '[] l = l
+  Concat (x:xs) l = x : Concat xs l
+
+hListConcat :: HList f as -> HList f bs -> HList f (Concat as bs)
+hListConcat HListNil l = l
+hListConcat (HListCons x xs) l = HListCons x (hListConcat xs l)
+-}
+
+
+--
 -- * Tuple ADTs
 --
 
@@ -311,6 +391,13 @@ projectTuple TypeListElem_Base tup = tupleHead tup
 projectTuple (TypeListElem_Cons elemPf) tup =
   projectTuple elemPf $ tupleTail tup
 
+-- | Project an element of an 'HList'
+projectHList :: HList f as -> TypeListElem as a -> f a
+projectHList (HListCons t _) TypeListElem_Base = t
+projectHList (HListCons _ ts) (TypeListElem_Cons pf) = projectHList ts pf
+projectHList HListNil tp_elem = case tp_elem of { }
+
+
 -- Need a TraversableADT instance for each ADT type
 instance TraversableADT (TupleF as) where
   traverseADT _ Tuple0 = pure Tuple0
@@ -381,6 +468,11 @@ instance GrappaTypeList as => GrappaADT (TupleF as) where
 
 -- | Type synonym for Grappa tuples
 type GTuple ts = ADT (TupleF ts)
+
+-- | Map a type function over a list of types
+type family MapF (f :: * -> *) (xs :: [*]) where
+  MapF f '[] = '[]
+  MapF f (x ': xs) = f x ': MapF f xs
 
 -- | Defined type class for mappping a constraint function over a list; note
 -- that we special-case small-sized lists, to help GHC do less unfolding
@@ -552,6 +644,10 @@ instance IsList (ADT (ListF a)) where
   toList (ADT (Cons (Id x) (Id xs))) = x : toList xs
 
 
+--
+-- * Grappa-Specific Printing Methods
+--
+
 class GrappaShow t where
   grappaShow :: t -> String
 
@@ -563,10 +659,6 @@ instance GrappaShow Int where
 
 instance GrappaShow a => GrappaShow (Id a) where
   grappaShow (Id x) = grappaShow x
-
-type family MapF (f :: * -> *) (xs :: [*]) where
-  MapF f '[] = '[]
-  MapF f (x ': xs) = f x ': MapF f xs
 
 instance MapC GrappaShow (MapF f ts) => GrappaShow (TupleF ts f r) where
   grappaShow Tuple0 = "()"

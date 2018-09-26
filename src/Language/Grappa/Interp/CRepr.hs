@@ -54,7 +54,7 @@ cExprType (CExprBool _)    = BoolType
 cExprType (CExprInt _)     = IntType
 cExprType (CExprDouble _)  = DoubleType
 cExprType (CExprTuple tup) =
-  TupleType $ mapMapList cExprType $ tupleToMapList tup
+  TupleType $ mapHList cExprType $ tupleToHList tup
 cExprType _ = error "cExprType: unsupported CExpr"
 
 
@@ -95,9 +95,9 @@ projCTuple :: CExpr (ADT (TupleF ts)) ->
 projCTuple (CExprDynamic e) =
   case cDynExprType e of
     TupleType ts ->
-      mapListToTuple $ mapMapList
+      hListToTuple $ mapHList
       (\elemPf -> GExpr $ CExprDynamic $ TupleProjExpr ts elemPf e)
-      (buildMapListElems ts)
+      (buildHListElems ts)
 projCTuple (CExprTuple tup) = mapADT GExpr tup
 
 projCDist :: CExpr (Dist a) -> CVar a -> State Int (CDist a)
@@ -164,12 +164,12 @@ instance ValidRepr CRepr where
       show next_var ++ "' but got '" ++ show ve ++ "'."
     -- Starting from the current var #, associate with each type in ts
     -- a var #, yielding a list of (type, var #) pairs.
-    vexprs <- traverseMapList (\ty -> do
+    vexprs <- traverseHList (\ty -> do
                                   i <- get
                                   modify (+1)
                                   return $ GVExpr (ty, i)) ts
     put next_var -- reset the state
-    unGStmt $ k $ mapListToTuple vexprs
+    unGStmt $ k $ hListToTuple vexprs
 
   interp__'vwild _   = error "CRepr: unexpected wild"
   interp__'vlift _ _ = error "CRepr: unexpected lift"
@@ -188,7 +188,7 @@ instance ValidRepr CRepr where
 
   interp__'mkDist f =
     GExpr $ CExprDist $ \v@(tp, _) ->
-    coerceStmtRet tp . someCDist <$> unGStmt (f (GVExpr v))
+    coerceStmtRet tp . tupleCDist <$> unGStmt (f (GVExpr v))
 
 
 -- | Coerce an existentially typed SomeCDist to a CDist a, checking

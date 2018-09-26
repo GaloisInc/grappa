@@ -11,84 +11,6 @@ import qualified Numeric.Log as Log
 import           Language.Grappa.Distribution
 import           Language.Grappa.GrappaInternals
 
--- | A (MapList f [t0, t1, ..., tn]) is a list containing n elements,
--- with each element i having type (f ti).
-data MapList (f :: * -> *) (ts  :: [*]) where
-  MapListNil  :: MapList f '[]
-  MapListCons :: f a -> MapList f as -> MapList f (a ': as)
-
-consTupleToMapList :: TupleF (t ': ts) f r -> MapList f (t ': ts)
-consTupleToMapList tup = MapListCons (tupleHead tup)
-                         (tupleToMapList (tupleTail tup))
-
-tupleToMapList :: TupleF ts f r -> MapList f ts
-tupleToMapList Tuple0 = MapListNil
-tupleToMapList tup@(Tuple1 _)           = consTupleToMapList tup
-tupleToMapList tup@(Tuple2 _ _)         = consTupleToMapList tup
-tupleToMapList tup@(Tuple3 _ _ _)       = consTupleToMapList tup
-tupleToMapList tup@(Tuple4 _ _ _ _)     = consTupleToMapList tup
-tupleToMapList tup@(TupleN _ _ _ _ _ _) = consTupleToMapList tup
-
-mapMapList :: (forall a. f a -> g a) -> MapList f as -> MapList g as
-mapMapList _ MapListNil = MapListNil
-mapMapList f (MapListCons a as) = MapListCons (f a) (mapMapList f as)
-
-traverseMapList :: Applicative m => (forall a. f a -> m (g a)) ->
-                   MapList f ts -> m (MapList g ts)
-traverseMapList _ MapListNil = pure MapListNil
-traverseMapList f (MapListCons x xs) =
-  pure MapListCons <*> f x <*> traverseMapList f xs
-
-traverseMapList' :: Applicative m => (forall a. f a -> m b) ->
-                    MapList f ts -> m [b]
-traverseMapList' _ MapListNil         = pure []
-traverseMapList' f (MapListCons x xs) =
-  pure (:) <*> f x <*> traverseMapList' f xs
-
-foldMapList :: (forall a. f a -> b -> b) -> MapList f ts -> b -> b
-foldMapList _ MapListNil acc         = acc
-foldMapList g (MapListCons x xs) acc = g x $ foldMapList g xs acc
-
-mapListLength :: MapList f ts -> Int
-mapListLength l = foldMapList (const (+ 1)) l 0
-
-buildMapListElems :: MapList f as -> MapList (TypeListElem as) as
-buildMapListElems MapListNil = MapListNil
-buildMapListElems (MapListCons _ rest) =
-  MapListCons TypeListElem_Base (mapMapList TypeListElem_Cons
-                                  (buildMapListElems rest))
-
-projectMapList :: TypeListElem ts t -> MapList f ts -> f t
-projectMapList TypeListElem_Base (MapListCons x _) = x
-projectMapList (TypeListElem_Cons pf) (MapListCons _ rest) =
-  projectMapList pf rest
-
-mapListToTuple :: MapList f ts -> TupleF ts f r
-mapListToTuple MapListNil = Tuple0
-mapListToTuple (MapListCons x xs) = tupleCons x (mapListToTuple xs)
-
-mapListToList :: (forall a. f a -> b) -> MapList f ts -> [b]
-mapListToList _ MapListNil = []
-mapListToList g (MapListCons x xs) = g x : mapListToList g xs
-
-type family Concat (l1 :: [*]) (l2 :: [*]) where
-  Concat '[] l = l
-  Concat (x:xs) l = x : Concat xs l
-
-mapListConcat :: MapList f as -> MapList f bs -> MapList f (Concat as bs)
-mapListConcat MapListNil l = l
-mapListConcat (MapListCons x xs) l = MapListCons x (mapListConcat xs l)
-
-mapIMapList :: (forall a. f a -> Int -> b) -> MapList f as -> [b]
-mapIMapList g l =
-  snd $ foldMapList (\x (i, acc) -> (i+1, g x i : acc)) l (0, [])
-
-zipWithList :: (forall a. f a -> b -> c) -> MapList f as -> [b] -> [c]
-zipWithList g l1 l2 = zipWith ($) (mapListToList g l1) l2
-
-zipWithList3 :: (forall a. f a -> b -> c -> d) ->
-                MapList f as -> [b] -> [c] -> [d]
-zipWithList3 g l1 l2 l3 = zipWith3 ($) (mapListToList g l1) l2 l3  
 
 -- | The types of C expressions that we are targeting with our compiler
 data CType a where
@@ -98,8 +20,11 @@ data CType a where
   TupleType  :: CTypes ts -> CType (ADT (TupleF ts))
   ListType   :: CType t -> CType (ADT (ListF t))
 
+-- | An existentially-quantified 'CType'
 data SomeCType = forall a. SomeCType (CType a)
-data SomeCTypes = forall as. SomeCTypes (CType as)
+
+-- | A heterogeneous list of 'CType's
+type CTypes ts = HList CType ts
 
 instance Show (CType a) where
   show DoubleType    = "DoubleType"
@@ -108,7 +33,9 @@ instance Show (CType a) where
   show (TupleType _) = "TupleType"
   show (ListType _)  = "ListType"
 
+-- | Typeclass for associating a 'CType' with a Haskell type
 class HasCType a where cType :: CType a
+
 instance HasCType Int where cType  = IntType
 instance HasCType R where cType    = DoubleType
 instance HasCType Prob where cType = error "HasCType: no CType Prob"
@@ -118,12 +45,16 @@ instance HasCTypes ts => HasCType (ADT (TupleF ts)) where
 instance HasCType t => HasCType (ADT (ListF t)) where
   cType = ListType cType
 
+-- | Typeclass for associating a list of 'CType's with Haskell types
 class HasCTypes ts where
   cTypes :: CTypes ts
-instance HasCTypes '[] where cTypes = MapListNil
-instance (HasCType t, HasCTypes ts) => HasCTypes (t:ts) where
-  cTypes = MapListCons cType cTypes
 
+instance HasCTypes '[] where cTypes = HListNil
+instance (HasCType t, HasCTypes ts) => HasCTypes (t:ts) where
+  cTypes = HListCons cType cTypes
+
+-- | Test two 'CType's for equality, returning a Haskell type equality on
+-- success and 'Nothing' on failure
 cTypeEq :: CType a -> CType b -> Maybe (a :~: b)
 cTypeEq DoubleType DoubleType = Just Refl
 cTypeEq IntType IntType       = Just Refl
@@ -138,24 +69,21 @@ cTypeEq (ListType a) (ListType b) =
     _ -> Nothing
 cTypeEq _ _ = Nothing
 
-type CTypes ts = MapList CType ts
-
+-- | Test two lists of 'CType's for equality
 cTypesEq :: CTypes as -> CTypes bs -> Maybe (as :~: bs)
-cTypesEq MapListNil MapListNil = Just Refl
-cTypesEq (MapListCons a as) (MapListCons b bs) =
+cTypesEq HListNil HListNil = Just Refl
+cTypesEq (HListCons a as) (HListCons b bs) =
   case (cTypeEq a b, cTypesEq as bs) of
     (Just Refl, Just Refl) -> Just Refl
     _ -> Nothing
 cTypesEq _ _ = Nothing
 
+-- | Build a "proof" that there is no functional 'CType' by deriving any
+-- arbitrary type @c@ from such a 'CType'
 funCTypeFalse :: CType (a -> b) -> c
-funCTypeFalse ty = case ty of
+funCTypeFalse ty = case ty of { }
 
-cTypesElem :: CTypes as -> TypeListElem as a -> CType a
-cTypesElem (MapListCons t _) TypeListElem_Base = t
-cTypesElem (MapListCons _ ts) (TypeListElem_Cons pf) = cTypesElem ts pf
-cTypesElem MapListNil _ = error "cTypesElem: unexpected MapListNil"
-
+-- | Check if a 'CType' is a base type
 isBaseType :: CType a -> Bool
 isBaseType DoubleType = True
 isBaseType IntType    = True
@@ -169,19 +97,24 @@ data Literal
   | BoolLit Bool
   deriving Show
 
+-- | A C variable
 newtype VarName = VarName Int deriving Show
 
+-- | A C function name
 type FunName = String
 
+-- | A C unary operation
 data UnaryOp = NegateOp | NotOp
              deriving Show
 
+-- | A C binary operation
 data BinaryOp
   = PlusOp | TimesOp | MinusOp | DivOp | ExpOp
   | LtOp | LteOp | GtOp | GteOp | EqOp | NeOp
   | AndOp | OrOp
   deriving Show
 
+-- | A dynamic expression, which is compiled to C
 data CDynExpr a where
   LitExpr       :: CType a -> Literal -> CDynExpr a
   VarExpr       :: CType a -> VarName -> CDynExpr a
@@ -196,41 +129,49 @@ data CDynExpr a where
   TupleProjExpr :: CTypes as -> TypeListElem as a ->
                    CDynExpr (ADT (TupleF as)) -> CDynExpr a
 
-type CDynExprs as = MapList CDynExpr as
+-- | A list of C dynamic expressions, one of each type in @as@
+type CDynExprs as = HList CDynExpr as
 
+-- | Build a C expression for the literal constant @0@ at a given type
 cDynZero :: CType a -> CDynExpr a
 cDynZero IntType    = LitExpr IntType $ IntLit 0
 cDynZero DoubleType = LitExpr DoubleType $ DoubleLit 0.0
 cDynZero BoolType   = LitExpr BoolType $ BoolLit False
 cDynZero _          = error "cDynZero: unsupported type"
 
+-- | Build a C expression for the literal constant @1@ at a given type
 cDynOne :: CType a -> CDynExpr a
 cDynOne IntType    = LitExpr IntType $ IntLit 1
 cDynOne DoubleType = LitExpr DoubleType $ DoubleLit 1.0
 cDynOne BoolType   = LitExpr BoolType $ BoolLit True
 cDynOne _          = error "cDynOne: unsupported type"
 
+-- | Build a function call to a unary C function
 cDynFunCall :: (HasCType a, HasCType b) => String -> CDynExpr a -> CDynExpr b
 cDynFunCall fName arg =
-  FunCallExpr fName (MapListCons cType MapListNil)
-  cType (MapListCons arg MapListNil)
+  FunCallExpr fName (HListCons cType HListNil)
+  cType (HListCons arg HListNil)
 
+-- | Build a function call to a binary C function
 cDynFunCall2 :: (HasCType a, HasCType b, HasCType c) =>
                 String -> CDynExpr a -> CDynExpr b -> CDynExpr c
 cDynFunCall2 fName arg1 arg2 =
-  FunCallExpr fName (MapListCons cType (MapListCons cType MapListNil))
-  cType (MapListCons arg1 (MapListCons arg2 MapListNil))
+  FunCallExpr fName (HListCons cType (HListCons cType HListNil))
+  cType (HListCons arg1 (HListCons arg2 HListNil))
 
+-- | Build a function call to a trinary C function
 cDynFunCall3 :: (HasCType a, HasCType b, HasCType c, HasCType d) =>
                 String -> CDynExpr a -> CDynExpr b -> CDynExpr c -> CDynExpr d
 cDynFunCall3 fName arg1 arg2 arg3 =
   FunCallExpr fName
-  (MapListCons cType (MapListCons cType (MapListCons cType MapListNil)))
-  cType (MapListCons arg1 (MapListCons arg2 (MapListCons arg3 MapListNil)))
+  (HListCons cType (HListCons cType (HListCons cType HListNil)))
+  cType (HListCons arg1 (HListCons arg2 (HListCons arg3 HListNil)))
 
+-- | Build a function call to the C @log@ function
 cDynLog :: CDynExpr R -> CDynExpr R
 cDynLog e = cDynFunCall "log" e
 
+-- | Compute the type of a dynamic expression
 cDynExprType :: CDynExpr a -> CType a
 cDynExprType (LitExpr t _)               = t
 cDynExprType (VarExpr t _)               = t
@@ -239,59 +180,80 @@ cDynExprType (BinaryExpr t _ _ _)        = t
 cDynExprType (FunCallExpr _ _ t _)       = t
 cDynExprType (NamedVarExpr t _)          = t
 cDynExprType (CondExpr _ e _)            = cDynExprType e
-cDynExprType (TupleProjExpr ts elemPf _) = projectMapList elemPf ts
+cDynExprType (TupleProjExpr ts elemPf _) = projectHList ts elemPf
 
+-- | A C representation of a distribution
 data CDist a where
+  -- | A distribution over 'Double's is just an expression for its PDF
   DoubleDist :: Log.Log (CDynExpr R) -> CDist R
+  -- | A distribution over 'Int's is just an expression for its PDF
   IntDist    :: Log.Log (CDynExpr R) -> CDist Int
+  -- | A distribution over 'Bool's is just an expression for its PDF
   BoolDist   :: Log.Log (CDynExpr R) -> CDist Bool
+  -- | A distribution over tuples is a tuple of distributions, one for each
+  -- element. Note that later distributions in the tuple have the values drawn
+  -- from the earlier ones in scope.
   TupleDist  :: CDists as -> CDist (ADT (TupleF as))
+  -- | A distribution over lists is a single distribution over the elements of
+  -- the list. Note that this implicitly assumes that the length of the list is
+  -- fixed at runtime.
   ListDist   :: CDist a -> CDist (ADT (ListF a))
 
-type CDists ts = MapList CDist ts
+-- | A heterogeneous list of C distributions
+type CDists ts = HList CDist ts
 
+-- | A C distribution of some unknown type
 data SomeCDist = forall a. SomeCDist (CDist a)
+
+-- | A list of C distributions of some unknown types
 data SomeCDists = forall as. SomeCDists (CDists as)
 
-someCDist :: [SomeCDist] -> SomeCDist
-someCDist [x] = x
-someCDist ds  = tupleSomeCDists ds
+-- | Convert a list of existentially quantified distributions to an
+-- existentially quantified list of distributions
+someCDistsOfList :: [SomeCDist] -> SomeCDists
+someCDistsOfList [] = SomeCDists HListNil
+someCDistsOfList (SomeCDist d : ds) =
+  case someCDistsOfList ds of
+    SomeCDists ds' -> SomeCDists (HListCons d ds')
 
-someCDists :: [SomeCDist] -> SomeCDists
-someCDists [] = SomeCDists MapListNil
-someCDists (SomeCDist d : ds) =
-  case someCDists ds of
-    SomeCDists ds' ->
-      SomeCDists (MapListCons d ds')
-
-someCDists' :: CDists as -> [SomeCDist]
-someCDists' ds = mapListToList SomeCDist ds
-
-tupleSomeCDists :: [SomeCDist] -> SomeCDist
-tupleSomeCDists ds =
-  case someCDists ds of
+-- | Build a tuple distribution from a list of distributions for the elements,
+-- with the special case that a unary list is just itself
+tupleCDist :: [SomeCDist] -> SomeCDist
+tupleCDist [d] = d
+tupleCDist ds  =
+  case someCDistsOfList ds of
     SomeCDists ds' -> SomeCDist $ TupleDist ds'
 
+-- | Convert a 'CDists' list to a list of 'SomeCDist's
+cDistsToList :: CDists as -> [SomeCDist]
+cDistsToList ds = hListToList SomeCDist ds
+
+-- | Get the 'CType' of a C distribution
 cDistType :: CDist a -> CType a
 cDistType (DoubleDist _) = DoubleType
 cDistType (IntDist _)    = IntType
 cDistType (BoolDist _)   = BoolType
-cDistType (TupleDist ds) = TupleType $ mapMapList cDistType ds
+cDistType (TupleDist ds) = TupleType $ mapHList cDistType ds
 cDistType (ListDist d)   = ListType $ cDistType d
 
+-- | Get the 'CTypes' of a list of C distributions
 cDistsTypes :: CDists as -> CTypes as
-cDistsTypes ds = mapMapList cDistType ds
+cDistsTypes ds = mapHList cDistType ds
 
+{-
 cDistBaseDist :: CDist a -> SomeCDist
 cDistBaseDist (ListDist d) = SomeCDist d
 cDistBaseDist _ = error "cDistBase: expected list or vec dist"
+-}
 
-cDistExpr :: CDist a -> CDynExpr R
-cDistExpr (DoubleDist (Log.Exp e)) = e
-cDistExpr (IntDist (Log.Exp e)) = e
-cDistExpr (BoolDist (Log.Exp e)) = e
-cDistExpr _ = error "cDistExpr: expected dist of base type"
+-- | Extract the expression for the PDF of a distribution over a base type
+cDistPDFExpr :: CDist a -> CDynExpr R
+cDistPDFExpr (DoubleDist (Log.Exp e)) = e
+cDistPDFExpr (IntDist (Log.Exp e)) = e
+cDistPDFExpr (BoolDist (Log.Exp e)) = e
+cDistPDFExpr _ = error "cDistPDFExpr: expected dist of base type"
 
+-- | Get the (existentially-quantified) type of a 'SomeCDist'
 someCDistType :: SomeCDist -> SomeCType
 someCDistType (SomeCDist d) = SomeCType $ cDistType d
 
