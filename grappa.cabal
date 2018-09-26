@@ -61,15 +61,6 @@ executable grappa-build
                , directory
                , process
 
-executable c-printer-test
-  hs-source-dirs: c-printer-test
-  main-is: Main.hs
-  build-depends: base
-               , grappa
-               , filepath
-               , directory
-               , log-domain >= 0.11
-
 library
   exposed-modules:     Language.Grappa
 
@@ -107,38 +98,18 @@ library
                      , Language.Grappa.Interp.ProductRepr
                      , Language.Grappa.Interp.FunRepr
                      , Language.Grappa.Interp.TypedExpr
-                     , Language.Grappa.Interp.CExpr
                      , Language.Grappa.Interp.CExprGADT
                      , Language.Grappa.Interp.CRepr
 
                      -- Inference methods
                      , Language.Grappa.Inference
                      , Language.Grappa.Inference.Util
-                     -- , Language.Grappa.Inference.CoordinateDescent
                      , Language.Grappa.Inference.GradientDescent
                      , Language.Grappa.Inference.HMC
-                     -- , Language.Grappa.Inference.IPMCMC
-                     -- , Language.Grappa.Inference.Particle
-                     -- , Language.Grappa.Inference.ParticleGibbs
-                     -- , Language.Grappa.Inference.Simple
-                     -- , Language.Grappa.Inference.SMC
-                     -- , Language.Grappa.Inference.Reparameterize
                      , Language.Grappa.Inference.BayesNetInference
-                     , Language.Grappa.Inference.CPrinter
                      , Language.Grappa.Inference.CTranslate
 
-                     -- Examples
-                     -- , Language.Grappa.Examples
-                     -- , Language.Grappa.Examples.CP41
-                     -- , Language.Grappa.Examples.CP7.CP7
-                     -- , Language.Grappa.Examples.CP7.MaxCP7
-                     -- , Language.Grappa.Examples.TalkExamples
-                     -- , Language.Grappa.Examples.Scratch
-                     -- , Language.Grappa.Examples.Hackathon
-
                      -- misc. utility modules
-                     -- , Control.Monad.Concurrent
-                     -- , Data.Tsil
                      , Language.Haskell.TH.GrappaUtil
   other-modules:       Language.Haskell.TH.Compat
   build-tools:         alex, happy
