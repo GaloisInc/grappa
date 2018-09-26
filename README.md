@@ -28,3 +28,15 @@ export GRAPPA_LIB=/path/to/Grappa
 
 NOTE: Grappa (currently) depends on stack. Even if you build Grappa without
 stack, the Grappa compiler itself calls stack to compile Grappa programs.
+
+
+# Compiling a Grappa Program
+
+To compile a Grappa program, use the following command:
+
+```
+stack exec grappa-c path/to/pgm.grappa
+```
+
+This will create an executable with the `.grappa` suffix removed. For instance,
+the above command would create the file `path/to/pgm`.
