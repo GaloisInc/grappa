@@ -100,6 +100,7 @@ library
                      , Language.Grappa.Interp.TypedExpr
                      , Language.Grappa.Interp.CExpr
                      , Language.Grappa.Interp.CRepr
+                     , Language.Grappa.Interp.ProbFun
 
                      -- Inference methods
                      , Language.Grappa.Inference
