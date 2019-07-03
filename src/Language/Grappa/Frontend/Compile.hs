@@ -339,8 +339,9 @@ instance Compilable (Exp Typed) TH.Exp where
     go (ParensExp enabled _) = notEnabled enabled
     go (OpExp enabled _ _ _) = notEnabled enabled
 
--- | "Raw", non-interpreted compilation of expressions, for, e.g., parameters to
--- inference methods
+-- | "Raw", non-interpreted compilation of expressions, for parameters to
+-- inference methods. Compiles Grappa expressions of Haskell type @a@ directly
+-- to a Haskell expression of type @a@.
 rawCompileExpr :: Exp Typed -> Compile TH.Exp
 rawCompileExpr e = withCompileCtx e $ compile' e where
   compile' :: Exp Typed -> Compile TH.Exp
