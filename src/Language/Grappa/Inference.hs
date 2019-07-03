@@ -11,17 +11,13 @@
 module Language.Grappa.Inference
        (
        -- * External interface
-         InferenceParam(..)
-       , InferenceMethod(..)
-       , ParamType(..)
-       , detailInferenceMethods
+         detailInferenceMethods
        , findMethod
        ) where
 
 import qualified Data.Foldable as F
 import           Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Language.Haskell.TH as TH
 import qualified Text.PrettyPrint.ANSI.Leijen as PP
 
 import System.IO
@@ -29,6 +25,7 @@ import Control.Monad.IO.Class
 import Control.Monad.State
 
 import Language.Grappa.GrappaInternals
+import Language.Grappa.Frontend.AST
 import Language.Grappa.Frontend.DataSource
 import Language.Grappa.Distribution
 import Language.Grappa.Interp
@@ -57,23 +54,6 @@ import qualified Data.Vector.Generic as VGen
 
 import qualified Numeric.Log as Log
 
-
-data ParamType = PTString | PTInt | PTFloat deriving (Eq, Show)
-
-data InferenceParam = InferenceParam
-  { ipName        :: String
-  , ipDescription :: String
-  , ipType        :: ParamType
-  } deriving (Eq, Show)
-
-data InferenceMethod = InferenceMethod
-  { imName         :: String
-  , imDescription  :: String
-  , imParams       :: [InferenceParam]
-  , imRunFunc      :: TH.Name
-  , imModelCopies  :: Int
-  } deriving (Eq, Show)
-
 detailInferenceMethods :: IO ()
 detailInferenceMethods = mapM_ go allMethods
   where go im =
@@ -86,10 +66,7 @@ detailInferenceMethods = mapM_ go allMethods
 
 ppParam :: InferenceParam -> PP.Doc
 ppParam ip =
-  PP.hsep [ PP.text (ipName ip), PP.text "::", go (ipType ip) ]
-  where go PTString = PP.text "String"
-        go PTInt    = PP.text "Int"
-        go PTFloat  = PP.text "Float"
+  PP.hsep [ PP.text (ipName ip), PP.text "::", PP.pretty (ipType ip) ]
 
 grappaPrint :: GrappaShow t => t -> IO ()
 grappaPrint x =
@@ -164,9 +141,9 @@ hmcMethod = InferenceMethod
   { imName = "hmc"
   , imDescription = "Hamiltonian Monte-Carlo"
   , imParams =
-      [ InferenceParam "len" "Number of samples to generate" PTInt
-      , InferenceParam "l" "Number of simulation steps for each sample" PTInt
-      , InferenceParam "e" "Step size for simulation steps" PTFloat
+      [ InferenceParam "len" "Number of samples to generate" intType
+      , InferenceParam "l" "Number of simulation steps for each sample" intType
+      , InferenceParam "e" "Step size for simulation steps" doubleType
       ]
   , imRunFunc = 'runHMC
   , imModelCopies = 2
@@ -197,12 +174,12 @@ hmcdaMethod = InferenceMethod
   { imName = "hmcda"
   , imDescription = "Hamiltonian Monte-Carlo with Dual Averaging"
   , imParams =
-      [ InferenceParam "len" "Number of samples to generate" PTInt
+      [ InferenceParam "len" "Number of samples to generate" intType
       , InferenceParam "lenAdapt"
-        "Number of those samples during which to adapt the step size" PTInt
+        "Number of those samples during which to adapt the step size" intType
       , InferenceParam "lambda"
         "Total path length for each sample == step size * number of steps"
-        PTFloat
+        doubleType
       ]
   , imRunFunc = 'runHMCDA
   , imModelCopies = 2
@@ -237,9 +214,9 @@ nutsMethod = InferenceMethod
   { imName = "nuts"
   , imDescription = "No U-Turn Sampling"
   , imParams =
-      [ InferenceParam "len" "The number of samples to generate" PTInt
+      [ InferenceParam "len" "The number of samples to generate" intType
       , InferenceParam "lenAdapt"
-        "The number of samples during which to tune/adapt the step size" PTInt
+        "The number of samples during which to tune/adapt the step size" intType
       ]
   , imRunFunc = 'runNUTS
   , imModelCopies = 2
@@ -260,12 +237,12 @@ bpNutsMethod = InferenceMethod
   { imName = "bpNuts"
   , imDescription = "Belief Propagation Sampling plus No U-Turn Sampling"
   , imParams =
-      [ InferenceParam "len" "The number of samples to generate" PTInt
+      [ InferenceParam "len" "The number of samples to generate" intType
       , InferenceParam "nutsLen"
-        "The number of iterations of NUTS for each sample" PTInt
+        "The number of iterations of NUTS for each sample" intType
       , InferenceParam "nutsLenAdapt"
         "The number of samples for each run of NUTS during which to tune/adapt the step size"
-        PTInt
+        intType
       ]
   , imRunFunc = 'runBpNuts
   , imModelCopies = 1
@@ -298,7 +275,7 @@ gradientDescentMethod :: InferenceMethod
 gradientDescentMethod = InferenceMethod
   { imName = "gradient_descent"
   , imDescription = "Gradient Descent"
-  , imParams = [ InferenceParam "epsilon" "???" PTFloat ]
+  , imParams = [ InferenceParam "epsilon" "???" doubleType ]
   , imRunFunc = 'runGD
   , imModelCopies = 2
   }

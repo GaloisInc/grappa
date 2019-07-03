@@ -30,7 +30,6 @@ import Language.Grappa.Frontend.FixupOps
 import Language.Grappa.Frontend.TypeCheck
 import Language.Grappa.Frontend.DataSource
 import Language.Grappa.Frontend.Errors()
-import Language.Grappa.Inference
 import Language.Grappa.Interp
 import Language.Grappa.GrappaInternals
 import Language.Haskell.TH.GrappaUtil
@@ -860,7 +859,7 @@ instance Compilable (Decl Typed) [TH.Dec] where
                 (TH.NormalB src_exp_th) [] ]
 
   compile (MainDecl (GPriorStmt src_expr model_expr)
-            (InfMethod { infName = meth , infParams = params })) =
+            (AppliedInfMethod { infName = meth , infParams = params })) =
     do model_th <- compile model_expr
        src_expr_th <- compile src_expr
        params_th <- mapM rawCompileExpr params

@@ -92,8 +92,8 @@ decl :: { Decl Raw }
 maindecl :: { Decl Raw }
   : gprior 'i;' 'using' method { MainDecl $1 $4 }
 
-method :: { InfMethod Raw }
-  : IDENT '(' sep(exp, ',') ')' { InfMethod (fst $1) $3 }
+method :: { AppliedInfMethod Raw }
+  : IDENT '(' sep(exp, ',') ')' { AppliedInfMethod (fst $1) $3 }
 
 gprior :: { GPriorStmt Raw }
   : source_exp '~' exp { GPriorStmt $1 $3 }

@@ -25,7 +25,6 @@ import Control.Monad.Except
 import Language.Grappa.Frontend.AST
 import Language.Grappa.Frontend.IngestEmitType
 import Language.Grappa.Interp
-import Language.Grappa.Inference
 
 
 --
@@ -510,9 +509,9 @@ instance Zonkable (Decl Typed) where
   zonk' (MainDecl st m) =
     MainDecl <$> zonk' st <*> zonk' m
 
-instance Zonkable (InfMethod Typed) where
-  zonk' (InfMethod n ps) =
-    InfMethod n <$> mapM zonk' ps
+instance Zonkable (AppliedInfMethod Typed) where
+  zonk' (AppliedInfMethod n ps) =
+    AppliedInfMethod n <$> mapM zonk' ps
 
 instance Zonkable (ModelCase Typed) where
   zonk' (ModelCase patt maybe_exp body) =
@@ -1357,13 +1356,10 @@ instance TypeCheckable () Decl where
   typeCheck' (SourceDecl name tp sexp) () = do
     sd <- SourceDecl name tp <$> typeCheck sexp tp
     zonk sd
-  typeCheck' (MainDecl gprior (InfMethod name args)) () = do
+  typeCheck' (MainDecl gprior (AppliedInfMethod name args)) () = do
     gprior_tp <- typeCheck gprior ()
-    params_tp <- sequence [ typeCheck' e (grappaType (ipType p))
+    params_tp <- sequence [ typeCheck' e (ipType p)
                           | e <- args
                           | p <- imParams name
                           ]
-    zonk (MainDecl gprior_tp (InfMethod name params_tp))
-      where grappaType PTString = error "Grappa doesn't understand strings yet!"
-            grappaType PTInt    = intType
-            grappaType PTFloat  = doubleType
+    zonk (MainDecl gprior_tp (AppliedInfMethod name params_tp))

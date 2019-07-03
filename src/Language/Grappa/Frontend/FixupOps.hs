@@ -185,6 +185,6 @@ instance FixupOps Decl where
   fixupOps (MainDecl gprior method) =
     MainDecl (fixupOps gprior) (fixupOps method)
 
-instance FixupOps InfMethod where
-  fixupOps (InfMethod name params) =
-    InfMethod name (map fixupOps params)
+instance FixupOps AppliedInfMethod where
+  fixupOps (AppliedInfMethod name params) =
+    AppliedInfMethod name (map fixupOps params)

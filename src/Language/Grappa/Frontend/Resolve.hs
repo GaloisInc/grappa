@@ -439,8 +439,8 @@ instance Resolvable Decl where
   resolve (MainDecl gprior method) =
     MainDecl <$> resolve gprior <*> resolve method
 
-instance Resolvable InfMethod where
-  resolve (InfMethod name params)
+instance Resolvable AppliedInfMethod where
+  resolve (AppliedInfMethod name params)
     | Just method <- findMethod name
-      = InfMethod method <$> mapM resolve params
+      = AppliedInfMethod method <$> mapM resolve params
     | otherwise = error ("No inference method named " ++ show name)

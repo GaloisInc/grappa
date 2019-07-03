@@ -25,7 +25,6 @@ import Control.Monad.State
 
 import Language.Grappa.Distribution
 import Language.Grappa.GrappaInternals
-import Language.Grappa.Inference
 
 import Text.PrettyPrint.ANSI.Leijen ((<+>), (<>))
 import qualified Text.PrettyPrint.ANSI.Leijen as PP
@@ -316,9 +315,27 @@ data Decl p
     -- an anonymous model) has a name, a type, and a set of cases
   | SourceDecl Ident (TypeP (GetTypePhase p)) (SourceExp p)
     -- ^ A source declaration is a name, a type, and a source expression
-  | MainDecl (GPriorStmt p) (InfMethod p)
+  | MainDecl (GPriorStmt p) (AppliedInfMethod p)
 
-data InfMethod p = InfMethod
+-- | Parameter for an inference method
+data InferenceParam = InferenceParam
+  { ipName        :: String
+  , ipDescription :: String
+  , ipType        :: Type
+  } deriving (Eq, Show)
+
+-- | An inference method, including documentation and information on how to
+-- compile it to Template Haskell
+data InferenceMethod = InferenceMethod
+  { imName         :: String
+  , imDescription  :: String
+  , imParams       :: [InferenceParam]
+  , imRunFunc      :: TH.Name
+  , imModelCopies  :: Int
+  } deriving (Eq, Show)
+
+-- | An inference method fully applied to arguments
+data AppliedInfMethod p = AppliedInfMethod
   { infName   :: InferenceMethodName p
   , infParams :: [Exp p]
   }
@@ -428,7 +445,7 @@ deriving instance PhaseC Show p => Show (Pattern p)
 deriving instance PhaseC Show p => Show (FunCase p)
 deriving instance PhaseC Show p => Show (ModelCase p)
 deriving instance PhaseC Show p => Show (Decl p)
-deriving instance PhaseC Show p => Show (InfMethod p)
+deriving instance PhaseC Show p => Show (AppliedInfMethod p)
 
 -- These are needed for testing purposes
 deriving instance Eq (Name Raw)
@@ -445,7 +462,7 @@ deriving instance Eq (Pattern Raw)
 deriving instance Eq (FunCase Raw)
 deriving instance Eq (ModelCase Raw)
 deriving instance Eq (Decl Raw)
-deriving instance Eq (InfMethod Raw)
+deriving instance Eq (AppliedInfMethod Raw)
 
 
 --

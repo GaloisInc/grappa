@@ -332,9 +332,9 @@ instance RewriteMatches Decl where
   rewriteMatches (MainDecl gp m) =
     MainDecl <$> rewriteMatches gp <*> rewriteMatches m
 
-instance RewriteMatches InfMethod where
-  rewriteMatches (InfMethod name params) =
-    InfMethod name <$> mapM rewriteMatches params
+instance RewriteMatches AppliedInfMethod where
+  rewriteMatches (AppliedInfMethod name params) =
+    AppliedInfMethod name <$> mapM rewriteMatches params
 
 instance RewriteMatches GPriorStmt where
   rewriteMatches (GPriorStmt source expr) =
