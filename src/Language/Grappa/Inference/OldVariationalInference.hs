@@ -7,7 +7,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# OPTIONS_GHC -fno-warn-incomplete-patterns #-}
-module Language.Grappa.Inference.VariationalInference where
+module Language.Grappa.Inference.OldVariationalInference where
 
 import Control.Monad ( forM, replicateM )
 import Data.List ( transpose )
