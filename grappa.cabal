@@ -95,6 +95,7 @@ library
                      , Language.Grappa.Interp.CExpr
                      , Language.Grappa.Interp.CRepr
                      , Language.Grappa.Interp.ProbFun
+                     , Language.Grappa.Interp.VIDist
 
                      -- Inference methods
                      , Language.Grappa.Inference
@@ -103,6 +104,7 @@ library
                      , Language.Grappa.Inference.HMC
                      , Language.Grappa.Inference.BayesNetInference
                      , Language.Grappa.Inference.CTranslate
+                     , Language.Grappa.Inference.PVIE
 
                      -- misc. utility modules
                      , Language.Haskell.TH.GrappaUtil
@@ -140,6 +142,7 @@ library
                      , directory
                      , language-c
                      , pretty
+                     , lens
 
   -- -- This flag depends on the @variational-inference@ flag, which is
   -- -- handled automatically below.
