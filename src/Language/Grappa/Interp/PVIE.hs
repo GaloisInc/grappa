@@ -11,7 +11,7 @@
 module Language.Grappa.Interp.PVIE where
 
 import Data.Functor.Compose
-import Data.Functor.Product
+-- import Data.Functor.Product
 import Control.Lens
 import Control.Monad.State
 import Control.Monad.Primitive
@@ -147,6 +147,60 @@ gradAndRet n f params params_grad =
 -- * Distribution Approximators for Variational Inference
 ----------------------------------------------------------------------
 
+type EntropyFun = VIDimAsgn -> Params -> ParamsGrad -> IO Double
+type GradPDFFun a = Double -> a -> VIDimAsgn -> Params -> ParamsGrad -> IO ()
+type GrowFun = VIDimAsgn -> VIDimAsgn -> Params -> MutParams -> IO ()
+
+-- | The trivial entropy function for the only distribution over ()
+unitEntropyFun :: EntropyFun
+unitEntropyFun _ _ _ = return 0
+
+-- | Add two independent entropy functions, where the first has the given
+-- dimensionality expression
+addEntropyFuns :: VIDim -> EntropyFun -> EntropyFun -> EntropyFun
+addEntropyFuns dim1 f1 f2 =
+  \asgn ps ps_grad ->
+  (+) <$>
+  f1 asgn (SV.take (evalVIDim dim1 asgn) ps)
+  (SMV.take (evalVIDim dim1 asgn) ps_grad)
+  <*>
+  f2 asgn (SV.drop (evalVIDim dim1 asgn) ps)
+  (SMV.drop (evalVIDim dim1 asgn) ps_grad)
+
+-- | The trivial log PDF function with 0 gradient
+unitGradPDFFun :: GradPDFFun a
+unitGradPDFFun _ _ _ _ _ = return ()
+
+-- | Add two log PDF functions, assuming they are independent, given a
+-- volume-preserving map from the codomain type to the two domain types
+-- (represented as a pair of functions instead of a function to a pair) along
+-- with a dimensionality expression for the number of params of the first
+addGradPDFFuns :: (a -> b) -> (a -> c) -> VIDim ->
+                  GradPDFFun b -> GradPDFFun c -> GradPDFFun a
+addGradPDFFuns split_l split_r dim1 f1 f2 =
+  \scale a asgn ps ps_grad ->
+  f1 scale (split_l a) asgn (SV.take (evalVIDim dim1 asgn) ps)
+  (SMV.take (evalVIDim dim1 asgn) ps_grad)
+  >>
+  f2 scale (split_r a) asgn (SV.drop (evalVIDim dim1 asgn) ps)
+  (SMV.drop (evalVIDim dim1 asgn) ps_grad)
+
+-- | The trivial 'viDistGrowParams' function for no parameters
+unitGrowFun :: GrowFun
+unitGrowFun _ _ _ _ = return ()
+
+-- | Combine two 'viDistGrowParams' fields, given the dimensionality expression
+-- for the first one
+combineGrowFuns :: VIDim -> GrowFun -> GrowFun -> GrowFun
+combineGrowFuns dim1 f1 f2 =
+  \old_asgn new_asgn params mut_params ->
+  f1 old_asgn new_asgn (SV.take (evalVIDim dim1 old_asgn) params)
+  (SMV.take (evalVIDim dim1 new_asgn) mut_params)
+  >>
+  f2 old_asgn new_asgn (SV.drop (evalVIDim dim1 old_asgn) params)
+  (SMV.drop (evalVIDim dim1 new_asgn) mut_params)
+
+
 -- | A family of distributions for variational inference
 data VIDistFam a =
   VIDistFam
@@ -160,19 +214,34 @@ data VIDistFam a =
 
     -- | Evaluate the entropy at the given parameters and also add the gradient
     -- of the entropy with respect to those parameters into the mutable vector
-    viDistEntropy :: VIDimAsgn -> Params -> ParamsGrad -> IO Double,
+    viDistEntropy :: EntropyFun,
 
     -- | Evaluate the gradient with respect to the parameters of the log PDF of
     -- the distribution, scaled by the supplied factor, and add the result to
     -- the supplied mutable vector
-    viDistScaledGradPDF :: Double -> a -> VIDimAsgn -> Params ->
-                           ParamsGrad -> IO (),
+    viDistScaledGradPDF :: GradPDFFun a,
 
     -- | Grow a vector of parameters from the dimensionality implied by one
     -- assignment to that of another, larger one, storing the result in the
     -- given mutable vector (assuming it has the correct size)
-    viDistGrowParams :: VIDimAsgn -> VIDimAsgn -> Params -> MutParams -> IO ()
+    viDistGrowParams :: GrowFun
   }
+
+-- | An "expression" for building up a family of distributions, which keeps
+-- track of how many dimensionality variables we have used so far
+newtype VIDistFamExpr a =
+  VIDistFamExpr { runVIDistFamExpr :: State VIDimVar (VIDistFam a) }
+
+-- | Evaluate a distribution family expression into a distribution family
+evalVIDistFamExpr :: VIDistFamExpr a -> VIDistFam a
+evalVIDistFamExpr (VIDistFamExpr m) = evalState m (VIDimVar 0)
+
+-- | The constant distribution (also known as the delta distribution), that
+-- returns a single value with unit probability
+deltaVIFamExpr :: Eq a => a -> VIDistFamExpr a
+deltaVIFamExpr a =
+  simpleVIFamExpr 0 (\_ -> return a) (\_ -> 0)
+  (\x _ -> if x == a then 0 else log 0)
 
 -- | Transform a distribution family over one type to another type using a
 -- volume-preserving isomorphism. A volume-preserving map is one that does not
@@ -188,21 +257,11 @@ xformVIDistFam f_to f_from (VIDistFam {..}) =
     ..
   }
 
--- | An "expression" for building up a family of distributions, which keeps
--- track of how many dimensionality variables we have used so far
-newtype VIDistFamExpr a =
-  VIDistFamExpr { runVIDistFamExpr :: State VIDimVar (VIDistFam a) }
-
--- | The constant distribution (also known as the delta distribution), that
--- returns a single value with unit probability
-deltaVIFamExpr :: Eq a => a -> VIDistFamExpr a
-deltaVIFamExpr a =
-  simpleVIFamExpr 0 (\_ -> return a) (\_ -> 0)
-  (\x _ -> if x == a then 0 else log 0)
-
--- | Evaluate a distribution family expression into a distribution family
-evalVIDistFamExpr :: VIDistFamExpr a -> VIDistFam a
-evalVIDistFamExpr (VIDistFamExpr m) = evalState m (VIDimVar 0)
+-- | Transform a distribution family expression over one type to another type
+-- using a volume-preserving isomorphism; see 'xformVIDistFam'.
+xformVIDistFamExpr :: (a -> b) -> (b -> a) -> VIDistFamExpr a -> VIDistFamExpr b
+xformVIDistFamExpr f_to f_from expr =
+  VIDistFamExpr (xformVIDistFam f_to f_from <$> runVIDistFamExpr expr)
 
 -- | Build a distribution family expression for a "simple" distribution, meaning
 -- it is not a composite of multiple distributions on sub-components.  Such a
@@ -273,107 +332,80 @@ bindDimVIFamExpr f =
   put $ incrVar v
   runVIDistFamExpr $ f (varVIDim v)
 
+-- | The trivial distribution family expression over the unit type
+unitVIDistExpr :: VIDistFamExpr ()
+unitVIDistExpr = simpleVIFamExpr 0 (\_ -> return ()) (\_ -> 0) (\_ _ -> 0)
+
 -- | Combine two distribution families into a distribution family over a pair
 pairVIDists :: VIDistFam a -> VIDistFam b -> VIDistFam (a,b)
 pairVIDists d1 d2 =
-  let dim1 = viDistDim d1
-      dim2 = viDistDim d2 in
+  let dim1 = viDistDim d1 in
   VIDistFam
-  { viDistDim = dim1 + dim2
+  { viDistDim = dim1 + viDistDim d2
   , viDistSample =
       (\asgn params ->
         (,) <$> viDistSample d1 asgn params <*> viDistSample d2 asgn params)
   , viDistEntropy =
-      (\asgn ps ps_grad ->
-        (+) <$>
-        viDistEntropy d1 asgn (SV.take (evalVIDim dim1 asgn) ps)
-        (SMV.take (evalVIDim dim1 asgn) ps_grad)
-        <*>
-        viDistEntropy d1 asgn (SV.drop (evalVIDim dim1 asgn) ps)
-        (SMV.drop (evalVIDim dim1 asgn) ps_grad))
+      addEntropyFuns dim1 (viDistEntropy d1) (viDistEntropy d2)
   , viDistScaledGradPDF =
-      (\scale (a,b) asgn ps ps_grad ->
-        viDistScaledGradPDF d1 scale a asgn
-        (SV.take (evalVIDim dim1 asgn) ps)
-        (SMV.take (evalVIDim dim1 asgn) ps_grad)
-        >>
-        viDistScaledGradPDF d2 scale b asgn
-        (SV.drop (evalVIDim dim2 asgn) ps)
-        (SMV.drop (evalVIDim dim2 asgn) ps_grad))
+      addGradPDFFuns fst snd dim1 (viDistScaledGradPDF d1) (viDistScaledGradPDF d2)
   , viDistGrowParams =
-      (\old_asgn new_asgn params mut_params ->
-        viDistGrowParams d1 old_asgn new_asgn
-        (SV.take (evalVIDim dim1 old_asgn) params)
-        (SMV.take (evalVIDim dim1 new_asgn) mut_params)
-        >>
-        viDistGrowParams d2 old_asgn new_asgn
-        (SV.drop (evalVIDim dim2 old_asgn) params)
-        (SMV.drop (evalVIDim dim2 new_asgn) mut_params))
+      combineGrowFuns dim1 (viDistGrowParams d1) (viDistGrowParams d2)
   }
 
 
--- FIXME HERE NOW: redfine everything below in terms of pairVIDists!
+-- | Combine two distribution family expressions using 'pairVIDists'
+pairVIDistExprs :: VIDistFamExpr a -> VIDistFamExpr b -> VIDistFamExpr (a,b)
+pairVIDistExprs d1 d2 =
+  VIDistFamExpr (pairVIDists <$> runVIDistFamExpr d1 <*> runVIDistFamExpr d2)
 
+hlistVIFamExpr :: HList (Compose VIDistFamExpr f) ts ->
+                  VIDistFamExpr (HList f ts)
+hlistVIFamExpr HListNil =
+  xformVIDistFamExpr (const HListNil) (const ()) unitVIDistExpr
+hlistVIFamExpr (HListCons d ds) =
+  xformVIDistFamExpr (\(a,as) -> HListCons a as) (\(HListCons a as) -> (a,as)) $
+  pairVIDistExprs (getCompose d) (hlistVIFamExpr ds)
 
 -- | Build a distribution family expression for a tuple from a tuple of
 -- distribution family expressions
 tupleVIFamExpr :: TupleF ts (Compose VIDistFamExpr f) (ADT (TupleF ts)) ->
                   VIDistFamExpr (TupleF ts f (ADT (TupleF ts)))
 tupleVIFamExpr d_exprs =
-  VIDistFamExpr $
-  traverseADT (\d_expr ->
-                fmap Compose $ runVIDistFamExpr $
-                getCompose d_expr) d_exprs >>= \dists ->
-  return $ VIDistFam
-  { viDistDim = foldrADT (viDistDim . getCompose) (+) 0 dists
-  , viDistSample =
-      (\asgn params ->
-        traverseADT (\d -> viDistSample (getCompose d) asgn params) dists)
-  , viDistEntropy =
-      (\asgn ps ps_grad ->
-        foldrADT (\d -> viDistEntropy (getCompose d) asgn ps ps_grad)
-        (\m1 m2 -> (+) <$> m1 <*> m2) (return 0)
-        dists)
-  , viDistScaledGradPDF =
-      (\scale tup asgn ps ps_grad ->
-        foldrADT
-        (\(Pair d a) ->
-          viDistScaledGradPDF (getCompose d) scale a asgn ps ps_grad)
-        (>>) (return ()) $
-        mapTuple2 Pair dists tup)
-  , viDistGrowParams =
-      (\old_asgn new_asgn params mut_params ->
-        flip evalStateT (0,0) $
-        foldrADT (\d -> do
-                     (p_ix, mp_ix) <- get
-                     let old_dim = evalVIDim (viDistDim $ getCompose d) old_asgn
-                         new_dim = evalVIDim (viDistDim $ getCompose d) new_asgn
-                     lift $ viDistGrowParams (getCompose d) old_asgn new_asgn
-                       (SV.drop p_ix params) (SMV.drop mp_ix mut_params)
-                     put (p_ix +  old_dim, mp_ix + new_dim))
-        (>>) (return ()) dists)
-  }
+  xformVIDistFamExpr hListToTuple tupleToHList $
+  hlistVIFamExpr $ tupleToHList d_exprs
 
-{-
--- | Build a distribution family expression for an IID distribution with a fixed
--- length
-iidVIFamExpr :: VIDim -> VIDistFamExpr a -> VIDistFamExpr (Vector a)
-iidVIFamExpr len d_expr =
-  VIDistFamExpr $ runVIDistFamExpr d_expr >>= \d ->
-  return $ VIDistFam
+-- | The distribution family over lists with a given length whose elements are
+-- drawn IID from the supplied distribution family
+iidVIFam :: VIDim -> VIDistFam a -> VIDistFam (Vector a)
+iidVIFam len d =
+  VIDistFam
   { viDistDim = len * viDistDim d
   , viDistSample =
     (\asgn params ->
       V.replicateM (evalVIDim len asgn) (viDistSample d asgn params))
   , viDistEntropy =
-      (\asgn ps ps_grad ->
-        flip execStateT 0 $
-        forM_ [0 .. evalVIDim len asgn] $ \ix ->
-        let off = ix * evalVIDim (viDistDim d) asgn in
-        viDistEntropy asgn (SV.drop off ps) (SMV.drop off ps_grad))
+    let entr = viDistEntropy d in
+    (\asgn ->
+      (iterate (addEntropyFuns (viDistDim d) entr) unitEntropyFun
+       !! evalVIDim len asgn)
+      asgn)
   , viDistScaledGradPDF =
-      (\scale tup asgn ps ps_grad ->
-        
-        )
+    let pdf = viDistScaledGradPDF d in
+    (\scale a asgn ->
+      (iterate (addGradPDFFuns V.head V.tail (viDistDim d) pdf) unitGradPDFFun
+       !! evalVIDim len asgn)
+      scale a asgn)
+  , viDistGrowParams =
+    let grow = viDistGrowParams d in
+    (\asgn ->
+      (iterate (combineGrowFuns (viDistDim d) grow) unitGrowFun
+       !! evalVIDim len asgn)
+      asgn)
   }
--}
+
+-- | The distribution family expression over lists with a given length whose
+-- elements are drawn IID from the supplied distribution family expression
+iidVIFamExpr :: VIDim -> VIDistFamExpr a -> VIDistFamExpr (Vector a)
+iidVIFamExpr len d_expr =
+  VIDistFamExpr (iidVIFam len <$> runVIDistFamExpr d_expr)
