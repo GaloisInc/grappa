@@ -1,0 +1,6 @@
+[submodule "cbits/eigen"]
+	path = cbits/eigen
+	url = https://github.com/eigenteam/eigen-git-mirror.git
+[submodule "cbits/lbfgspp"]
+	path = cbits/lbfgspp
+	url = https://github.com/yixuan/LBFGSpp.git
