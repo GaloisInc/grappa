@@ -40,25 +40,37 @@ import qualified System.Random.MWC.Distributions as MWC
 
 -- | A "dimensionality variable"
 -- (FIXME: explain what this means: an index into a 'VIDimAsgn'?)
-newtype VIDimVar = VIDimVar { viDimVarIx :: Int }
+newtype VIDimVar = VIDimVar { viDimVarIx :: Int } deriving Eq
 
 -- | Build a list of the first @n@ dimensionality variables
 viDimVars :: Int -> [VIDimVar]
 viDimVars n = take n $ map VIDimVar $ [0 ..]
 
-incrVar :: VIDimVar -> VIDimVar
-incrVar (VIDimVar i) = (VIDimVar (i+1))
+-- | The "first" dimensionality variable
+zeroVar :: VIDimVar
+zeroVar = VIDimVar 0
+
+-- | Get the next dimensionality variable after the given one
+nextVar :: VIDimVar -> VIDimVar
+nextVar (VIDimVar i) = (VIDimVar (i+1))
+
+maxVar :: VIDimVar -> VIDimVar -> VIDimVar
+maxVar (VIDimVar v1) (VIDimVar v2) = VIDimVar $ max v1 v2
 
 -- | An assignment to dimensionality variables, which should be non-negative
 newtype VIDimAsgn = VIDimAsgn [Int]
 
 -- | Create an assignment where all variables below the given one are set to 0
 zeroAsgn :: VIDimVar -> VIDimAsgn
-zeroAsgn (VIDimVar i) = VIDimAsgn $ take i $ repeat 0
+zeroAsgn (VIDimVar i) = VIDimAsgn $ take i $ repeat 1
 
 -- | Increment the assignment to a particular dimensionality variable
 incrAsgn :: VIDimVar -> VIDimAsgn -> VIDimAsgn
 incrAsgn (VIDimVar i) (VIDimAsgn asgn) = VIDimAsgn (over (ix i) (+ 1) asgn)
+
+-- | Increment the assignment to a particular dimensionality variable
+incrAsgnAll :: VIDimAsgn -> VIDimAsgn
+incrAsgnAll (VIDimAsgn asgn) = VIDimAsgn (map (+1) asgn)
 
 -- | Look up the value of a dimensionality variable in an assignment
 viDimVarVal :: VIDimVar -> VIDimAsgn -> Int
@@ -70,22 +82,22 @@ viDimVarVal (VIDimVar i) (VIDimAsgn ns) = ns !! i
 -- needed. Note that this function should always return a non-negative value.
 data VIDim = VIDim {
   evalVIDim :: VIDimAsgn -> Int,
-  viDimNumVars :: Int
+  viDimFirstUnusedVar :: VIDimVar
   }
 
 -- | Build a constant dimensionality
 constVIDim :: Int -> VIDim
-constVIDim k = VIDim (const k) 0
+constVIDim k = VIDim (const k) zeroVar
 
 -- | Build a variable dimensionality
 varVIDim :: VIDimVar -> VIDim
-varVIDim v = VIDim (viDimVarVal v) (viDimVarIx v)
+varVIDim v = VIDim (viDimVarVal v) (nextVar v)
 
 -- | Apply a binary operation to a 'VIDim', ensuring the resulting dimension
 -- evaluation is non-negative
 viDimBinOp :: (Int -> Int -> Int) -> VIDim -> VIDim -> VIDim
-viDimBinOp binop (VIDim eval1 sz1) (VIDim eval2 sz2) =
-  VIDim (\asgn -> max (eval1 asgn `binop` eval2 asgn) 0) (max sz1 sz2)
+viDimBinOp binop (VIDim eval1 v1) (VIDim eval2 v2) =
+  VIDim (\asgn -> max (eval1 asgn `binop` eval2 asgn) 0) (maxVar v1 v2)
 
 instance Num VIDim where
   (+) = viDimBinOp (+)
@@ -329,7 +341,7 @@ bindDimVIFamExpr :: (VIDim -> VIDistFamExpr a) -> VIDistFamExpr a
 bindDimVIFamExpr f =
   VIDistFamExpr $ do
   v <- get
-  put $ incrVar v
+  put $ nextVar v
   runVIDistFamExpr $ f (varVIDim v)
 
 -- | The trivial distribution family expression over the unit type
@@ -409,3 +421,97 @@ iidVIFam len d =
 iidVIFamExpr :: VIDim -> VIDistFamExpr a -> VIDistFamExpr (Vector a)
 iidVIFamExpr len d_expr =
   VIDistFamExpr (iidVIFam len <$> runVIDistFamExpr d_expr)
+
+
+----------------------------------------------------------------------
+-- * Variational Inference, Yay!
+----------------------------------------------------------------------
+
+mk_optimizer_fun :: VIDistFam a -> (a -> Double) ->
+                    (Params -> MutParams -> IO Double)
+mk_optimizer_fun = error "FIXME HERE: write mk_optimizer_fun"
+
+-- FIXME HERE: hook this up to libBFGS++
+optimize :: (Params -> MutParams -> IO Double) -> MutParams -> IO Double
+optimize = error "FIXME HERE: write optimize!"
+
+-- FIXME HERE: make VIDistFams know how to initialize their params
+
+-- | The amount that PVIE has to improve in an interation to seem "better"
+pvie_epsilon :: Double
+pvie_epsilon = 1.0e-6
+
+pvie :: VIDistFam a -> (a -> Double) -> IO (VIDimAsgn, Params, Double)
+pvie d log_p = init_pvie where
+
+  -- Initialize PVIE and start it running
+  init_pvie :: IO (VIDimAsgn, Params, Double)
+  init_pvie = do
+    -- Start with 0 for all dimensionality variables
+    let asgn = zeroAsgn $ viDimFirstUnusedVar $ viDistDim d
+    -- Allocate and initialize our mutable params
+    mut_params <- SMV.new (evalVIDim (viDistDim d) asgn)
+    -- FIXME HERE: have VIDistFams initialize their mut_params
+    SMV.set mut_params 0
+    -- Generate the initial value to try to beat
+    val <- optimize (mk_optimizer_fun d log_p) mut_params
+    params <- SV.unsafeFreeze mut_params
+    -- If there are no dimensionality variables in our distribution family, then
+    -- there is nothing to increment, so we are done
+    if viDimFirstUnusedVar (viDistDim d) == zeroVar then
+      outer asgn params val False
+      else
+      -- Perform the first iteration of optimizing the dimensionality variables
+      outer asgn params val True
+
+  -- The main outer loop
+  outer :: VIDimAsgn -> Params -> Double -> Bool ->
+           IO (VIDimAsgn, Params, Double)
+  outer asgn params last_val False =
+    -- If our last iteration of the outer loop did not improve, we are done, and
+    -- return the current assignment, parameters, and value
+    return (asgn, params, last_val)
+
+  outer asgn params last_val True =
+    do
+      -- Otherwise, start by allocating two new arrays, one for the current
+      -- parameters and one for the scratch space. The size should be big enough
+      -- for if we increment all dimensionality variables by one, which is the
+      -- most we will do in the upcoming iteration of the outer loop.
+      new_mut_params <- SMV.new (evalVIDim (viDistDim d) $ incrAsgnAll asgn)
+      scratch <- SMV.new (evalVIDim (viDistDim d) $ incrAsgnAll asgn)
+      -- Copy the old parameters into the new mutable params
+      let new_mut_params_slice = SMV.slice 0 (SV.length params) new_mut_params
+      SV.copy new_mut_params_slice params
+      new_params <- SV.unsafeFreeze new_mut_params
+      -- Start the inner loop at the first dimensionality variable, telling it
+      -- that we have not yet improved
+      inner asgn new_params last_val zeroVar scratch False
+
+  -- The main inner loop: takes in the current assignment to dimensionality
+  -- variables, the current "best" params for the associated size, the value for
+  -- those params, the next dimensionality variable to try to increment,
+  -- pre-allocated scratch space for parameters, and whether we have already
+  -- seen improvement in this iteration of the outer loop
+  inner :: VIDimAsgn -> Params -> Double -> VIDimVar -> MutParams -> Bool ->
+           IO (VIDimAsgn, Params, Double)
+  inner asgn last_params last_val next_var _ improved
+    | next_var == viDimFirstUnusedVar (viDistDim d)
+    = outer asgn last_params last_val improved
+
+  inner asgn last_params last_val next_var scratch improved = do
+    -- The next assignment we will try = increment next_var
+    let new_asgn = incrAsgn next_var asgn
+    -- Copy our current best parameters into our scratch area
+    viDistGrowParams d asgn new_asgn last_params scratch
+    -- Optimize those parameters
+    new_val <- optimize (mk_optimizer_fun d log_p) scratch
+    -- Test how much we improved
+    if last_val - new_val >= pvie_epsilon then
+      -- If we did improve, swap last_params and scratch, then iterate
+      do new_params <- SV.unsafeFreeze scratch
+         new_scratch <- SV.unsafeThaw last_params
+         inner new_asgn new_params new_val (nextVar next_var) new_scratch True
+      else
+      -- Otherwise, keep the same assignment, params, and scratch
+      inner asgn last_params last_val (nextVar next_var) scratch improved
