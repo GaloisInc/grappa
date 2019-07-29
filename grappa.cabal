@@ -155,6 +155,9 @@ library
   --                   , colour
   --                   , data-default-class
 
+  c-sources: cbits/optimize_lbfgs.cpp
+  include-dirs: cbits/Eigen cbits/lbfgspp/include
+
   if flag(show-splices)
     ghc-options: -ddump-splices
 
