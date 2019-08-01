@@ -7,6 +7,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ForeignFunctionInterface #-}
 
 module Language.Grappa.Interp.PVIE where
 
@@ -16,6 +17,9 @@ import Control.Lens
 import Control.Monad.State
 import Control.Monad.Primitive
 import qualified Numeric.Log as Log
+
+import Foreign.Ptr
+import Foreign.ForeignPtr
 
 import Data.Vector (Vector)
 import qualified Data.Vector as V
@@ -427,13 +431,37 @@ iidVIFamExpr len d_expr =
 -- * Variational Inference, Yay!
 ----------------------------------------------------------------------
 
+-- | The type of FFI-compatible functions that we can optimize
+type FFIOptFun = Int -> Ptr Double -> Ptr Double -> IO Double
+
 mk_optimizer_fun :: VIDistFam a -> (a -> Double) ->
                     (Params -> MutParams -> IO Double)
-mk_optimizer_fun = error "FIXME HERE: write mk_optimizer_fun"
+mk_optimizer_fun d log_p params_ptr grad_ptr =
+  error "FIXME HERE: write mk_optimizer_fun"
 
--- FIXME HERE: hook this up to libBFGS++
+foreign import ccall "optimize_lbfgs" optimize_lbfgs
+  :: Int -> FunPtr FFIOptFun -> Ptr Double -> IO Double
+
+foreign import ccall "wrapper" wrapFFIOptFun
+  :: FFIOptFun -> IO (FunPtr FFIOptFun)
+
+createFFIOptFun :: (Params -> MutParams -> IO Double) ->
+                   IO (FunPtr FFIOptFun)
+createFFIOptFun f =
+  wrapFFIOptFun $ \len params_ptr grad_ptr ->
+  do params_frgnptr <- newForeignPtr_ params_ptr
+     let params = SV.unsafeFromForeignPtr0 params_frgnptr len
+     grad_frgnptr <- newForeignPtr_ grad_ptr
+     let grad = SMV.unsafeFromForeignPtr0 grad_frgnptr len
+     f params grad
+
 optimize :: (Params -> MutParams -> IO Double) -> MutParams -> IO Double
-optimize = error "FIXME HERE: write optimize!"
+optimize f mut_params =
+  do f_ptr <- createFFIOptFun f
+     val <- SMV.unsafeWith mut_params
+       (\params_ptr -> optimize_lbfgs (SMV.length mut_params) f_ptr params_ptr)
+     freeHaskellFunPtr f_ptr
+     return val
 
 -- FIXME HERE: make VIDistFams know how to initialize their params
 
