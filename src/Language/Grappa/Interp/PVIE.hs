@@ -34,7 +34,7 @@ import Language.Grappa.Distribution
 import Language.Grappa.GrappaInternals
 
 import Language.Grappa.Rand.MWCRandM
--- import qualified System.Random.MWC as MWC
+import qualified System.Random.MWC as MWC
 import qualified System.Random.MWC.Distributions as MWC
 
 
@@ -434,11 +434,6 @@ iidVIFamExpr len d_expr =
 -- | The type of FFI-compatible functions that we can optimize
 type FFIOptFun = Int -> Ptr Double -> Ptr Double -> IO Double
 
-mk_optimizer_fun :: VIDistFam a -> (a -> Double) ->
-                    (Params -> MutParams -> IO Double)
-mk_optimizer_fun d log_p params_ptr grad_ptr =
-  error "FIXME HERE: write mk_optimizer_fun"
-
 foreign import ccall "optimize_lbfgs" optimize_lbfgs
   :: Int -> FunPtr FFIOptFun -> Ptr Double -> IO Double
 
@@ -469,12 +464,29 @@ optimize f mut_params =
 pvie_epsilon :: Double
 pvie_epsilon = 1.0e-6
 
+-- | FIXME: make this be a command-line option somehow!
+num_samples :: Int
+num_samples = 100
+
+-- FIXME HERE: call this something more meaningful!
+elbo_with_grad :: MWC.GenIO -> VIDistFam a -> (a -> Double) -> VIDimAsgn ->
+                    (Params -> MutParams -> IO Double)
+elbo_with_grad g d log_p asgn params grad =
+  do samples <-
+       replicateM num_samples (runRand g $ viDistSample d asgn params)
+     let n = fromIntegral num_samples
+     entr <- viDistEntropy d asgn params grad
+     forM_ samples $ \samp ->
+       viDistScaledGradPDF d (log_p samp / n) samp asgn params grad
+     return (entr - (1/n) * sum (map log_p samples))
+
 pvie :: VIDistFam a -> (a -> Double) -> IO (VIDimAsgn, Params, Double)
 pvie d log_p = init_pvie where
 
   -- Initialize PVIE and start it running
   init_pvie :: IO (VIDimAsgn, Params, Double)
   init_pvie = do
+    g <- MWC.createSystemRandom
     -- Start with 0 for all dimensionality variables
     let asgn = zeroAsgn $ viDimFirstUnusedVar $ viDistDim d
     -- Allocate and initialize our mutable params
@@ -482,25 +494,25 @@ pvie d log_p = init_pvie where
     -- FIXME HERE: have VIDistFams initialize their mut_params
     SMV.set mut_params 0
     -- Generate the initial value to try to beat
-    val <- optimize (mk_optimizer_fun d log_p) mut_params
+    val <- optimize (elbo_with_grad g d log_p asgn) mut_params
     params <- SV.unsafeFreeze mut_params
     -- If there are no dimensionality variables in our distribution family, then
     -- there is nothing to increment, so we are done
     if viDimFirstUnusedVar (viDistDim d) == zeroVar then
-      outer asgn params val False
+      outer g asgn params val False
       else
       -- Perform the first iteration of optimizing the dimensionality variables
-      outer asgn params val True
+      outer g asgn params val True
 
   -- The main outer loop
-  outer :: VIDimAsgn -> Params -> Double -> Bool ->
+  outer :: MWC.GenIO -> VIDimAsgn -> Params -> Double -> Bool ->
            IO (VIDimAsgn, Params, Double)
-  outer asgn params last_val False =
+  outer _ asgn params last_val False =
     -- If our last iteration of the outer loop did not improve, we are done, and
     -- return the current assignment, parameters, and value
     return (asgn, params, last_val)
 
-  outer asgn params last_val True =
+  outer g asgn params last_val True =
     do
       -- Otherwise, start by allocating two new arrays, one for the current
       -- parameters and one for the scratch space. The size should be big enough
@@ -514,32 +526,32 @@ pvie d log_p = init_pvie where
       new_params <- SV.unsafeFreeze new_mut_params
       -- Start the inner loop at the first dimensionality variable, telling it
       -- that we have not yet improved
-      inner asgn new_params last_val zeroVar scratch False
+      inner g asgn new_params last_val zeroVar scratch False
 
   -- The main inner loop: takes in the current assignment to dimensionality
   -- variables, the current "best" params for the associated size, the value for
   -- those params, the next dimensionality variable to try to increment,
   -- pre-allocated scratch space for parameters, and whether we have already
   -- seen improvement in this iteration of the outer loop
-  inner :: VIDimAsgn -> Params -> Double -> VIDimVar -> MutParams -> Bool ->
-           IO (VIDimAsgn, Params, Double)
-  inner asgn last_params last_val next_var _ improved
+  inner :: MWC.GenIO -> VIDimAsgn -> Params -> Double -> VIDimVar ->
+           MutParams -> Bool -> IO (VIDimAsgn, Params, Double)
+  inner g asgn last_params last_val next_var _ improved
     | next_var == viDimFirstUnusedVar (viDistDim d)
-    = outer asgn last_params last_val improved
+    = outer g asgn last_params last_val improved
 
-  inner asgn last_params last_val next_var scratch improved = do
+  inner g asgn last_params last_val next_var scratch improved = do
     -- The next assignment we will try = increment next_var
     let new_asgn = incrAsgn next_var asgn
     -- Copy our current best parameters into our scratch area
     viDistGrowParams d asgn new_asgn last_params scratch
     -- Optimize those parameters
-    new_val <- optimize (mk_optimizer_fun d log_p) scratch
+    new_val <- optimize (elbo_with_grad g d log_p asgn) scratch
     -- Test how much we improved
     if last_val - new_val >= pvie_epsilon then
       -- If we did improve, swap last_params and scratch, then iterate
       do new_params <- SV.unsafeFreeze scratch
          new_scratch <- SV.unsafeThaw last_params
-         inner new_asgn new_params new_val (nextVar next_var) new_scratch True
+         inner g new_asgn new_params new_val (nextVar next_var) new_scratch True
       else
       -- Otherwise, keep the same assignment, params, and scratch
-      inner asgn last_params last_val (nextVar next_var) scratch improved
+      inner g asgn last_params last_val (nextVar next_var) scratch improved
