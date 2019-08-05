@@ -863,7 +863,7 @@ instance Compilable (Decl Typed) [TH.Dec] where
             (AppliedInfMethod { infName = meth , infParams = params })) =
     do model_th <- compile model_expr
        src_expr_th <- compile src_expr
-       params_th <- mapM rawCompileExpr params
+       params_th <- mapM compile params
        let mainExpr =
              applyTHExp (TH.VarE (imRunFunc meth)) $
              params_th ++ src_expr_th : replicate (imModelCopies meth) model_th

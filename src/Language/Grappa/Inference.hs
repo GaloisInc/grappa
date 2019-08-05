@@ -4,6 +4,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- | Support for writing inference methods, as well as some examples of
 -- inference methods
@@ -22,6 +23,7 @@ import qualified Text.PrettyPrint.ANSI.Leijen as PP
 
 import System.IO
 import Control.Monad.IO.Class
+import Control.Monad.Identity
 import Control.Monad.State
 
 import Language.Grappa.GrappaInternals
@@ -53,6 +55,9 @@ import qualified Data.Vector.Generic as VGen
 --import qualified Numeric.AD.Mode.Reverse as ADR
 
 import qualified Numeric.Log as Log
+
+-- | Default representation for inference method parameters
+type ParamRepr = StandardHORepr Identity Double Int
 
 detailInferenceMethods :: IO ()
 detailInferenceMethods = mapM_ go allMethods
@@ -118,14 +123,14 @@ gradHelper src init_d d =
              logGradientOf (sampleDist d $ GVExpr $ VData dv))
 
 runHMC :: (GrappaShow (SJReprF (VectorSupply Double Int) a), GrappaType a) =>
-          Int -> Int -> R ->
+          GExpr ParamRepr Int -> GExpr ParamRepr Int -> GExpr ParamRepr R ->
           Source a ->
           GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist a) ->
           (forall r i.
            SupplyJointCtx (VectorSupply r i) r i =>
            GExpr (SJRepr (VectorSupply r i)) (Dist a)) ->
           IO ()
-runHMC len l e src init_d d =
+runHMC (unGExpr -> len) (unGExpr -> l) (unGExpr -> e) src init_d d =
   runMWCRandM $
   do (init_is, init_rs, outF, probF, gradF) <- gradHelper src init_d d
      let m     = VU.replicate (V.length init_rs) 1
@@ -150,14 +155,14 @@ hmcMethod = InferenceMethod
   }
 
 runHMCDA :: (GrappaShow (SJReprF (VectorSupply Double Int) a), GrappaType a) =>
-            Int -> Int -> R ->
+            GExpr ParamRepr Int -> GExpr ParamRepr Int -> GExpr ParamRepr R ->
             Source a ->
             GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist a) ->
             (forall r i.
              SupplyJointCtx (VectorSupply r i) r i =>
              GExpr (SJRepr (VectorSupply r i)) (Dist a)) ->
             IO ()
-runHMCDA len lenAdapt lambda src init_d d =
+runHMCDA (unGExpr -> len) (unGExpr -> lenAdapt) (unGExpr -> lambda) src init_d d =
   runMWCRandM $
   do (init_is, init_rs, outF, probF, gradF) <- gradHelper src init_d d
      let m     = VU.replicate (V.length init_rs) 1
@@ -187,14 +192,14 @@ hmcdaMethod = InferenceMethod
 
 
 runNUTS :: (GrappaType a, GrappaShow (SJReprF (VectorSupply Double Int) a)) =>
-           Int -> Int ->
+           GExpr ParamRepr Int -> GExpr ParamRepr Int ->
            Source a ->
            GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist a) ->
            (forall r i.
             SupplyJointCtx (VectorSupply r i) r i =>
             GExpr (SJRepr (VectorSupply r i)) (Dist a)) ->
            IO ()
-runNUTS len lenAdapt src init_d d =
+runNUTS (unGExpr -> len) (unGExpr -> lenAdapt) src init_d d =
   runMWCRandM $
   do (init_is, init_rs, outF, probF, gradF) <- gradHelper src init_d d
      if V.length init_rs == 0 then
@@ -223,9 +228,10 @@ nutsMethod = InferenceMethod
   }
 
 runBpNuts :: (GrappaShow (BNDynRetReprF a), GrappaType a) =>
-             Int -> Int -> Int -> Source a -> GExpr BNExprRepr (Dist a) ->
+             GExpr ParamRepr Int -> GExpr ParamRepr Int ->
+             GExpr ParamRepr Int -> Source a -> GExpr BNExprRepr (Dist a) ->
              IO ()
-runBpNuts len nutsLen nutsLenAdapt src d =
+runBpNuts (unGExpr -> len) (unGExpr -> nutsLen) (unGExpr -> nutsLenAdapt) src d =
   runMWCRandM $
   do dv <- liftIO (interpSource src)
      let net = bayesNetOf $ sampleDist d $ GVExpr dv
@@ -250,13 +256,13 @@ bpNutsMethod = InferenceMethod
 
 
 runGD :: (Show (SJReprF (VectorSupply Double Int) a), GrappaType a) =>
-         Double -> Source a ->
+         GExpr ParamRepr Double -> Source a ->
          GExpr (InitSupplyRepr (VectorSupply Double Int)) (Dist a) ->
          (forall r i.
           SupplyJointCtx (VectorSupply r i) r i =>
           GExpr (SJRepr (VectorSupply r i)) (Dist a)) ->
          IO ()
-runGD epsilon src init_d d =
+runGD (unGExpr -> epsilon) src init_d d =
   do (init_is, init_rs, outF, probF, gradF) <-
        runMWCRandM $ gradHelper src init_d d
      let params = GdParams
