@@ -398,3 +398,6 @@ instance Interp__viTuple4 ProbFunRepr a b c d where
                     (Compose $ xformVIDistFamExpr GExpr unGExpr db)
                     (Compose $ xformVIDistFamExpr GExpr unGExpr dc)
                     (Compose $ xformVIDistFamExpr GExpr unGExpr dd))
+
+instance Interp__viIID ProbFunRepr a where
+  interp__viIID = GExpr iidVIFamExpr
