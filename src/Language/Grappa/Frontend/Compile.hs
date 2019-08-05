@@ -880,7 +880,7 @@ compileGPostInterp filename str = runCompile $ do
   parsed_e <- embedM $ parseGPrior (startPos $ T.pack filename) str
   resolved_e <- embedM $ resolve parsed_e
   let fixed_e = fixupOps resolved_e
-  checked_e <- embedM $ typeCheck fixed_e ()
+  (checked_e, _) <- embedM $ typeInfer fixed_e
   compile checked_e
 
 gpost :: TH.QuasiQuoter

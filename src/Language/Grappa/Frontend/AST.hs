@@ -317,7 +317,8 @@ data Decl p
     -- ^ A source declaration is a name, a type, and a source expression
   | MainDecl (GPriorStmt p) (AppliedInfMethod p)
 
--- | Parameter for an inference method
+-- | Parameter for an inference method; the 'ipType' can have variable 0 free,
+-- to refer to the support type of the distribution being passed to the method
 data InferenceParam = InferenceParam
   { ipName        :: String
   , ipDescription :: String

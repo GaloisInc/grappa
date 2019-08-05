@@ -36,7 +36,7 @@ data TypeErrorContext = ErrorCtxExp (Exp PreTyped) (Maybe Type)
                       | ErrorCtxSourceExp (SourceExp PreTyped) (Maybe Type)
                       | ErrorCtxGenExp (GenExp PreTyped) (Maybe Type)
                       | ErrorCtxStmt (Stmt PreTyped) (Maybe ())
-                      | ErrorCtxGPStmt (GPriorStmt PreTyped) (Maybe ())
+                      | ErrorCtxGPStmt (GPriorStmt PreTyped) (Maybe Type)
                       | ErrorCtxPattern (Pattern PreTyped) (Maybe Type)
                       | ErrorCtxVPattern (Pattern PreTyped) (Maybe Type)
                       | ErrorCtxDecl (Decl PreTyped) (Maybe ())
@@ -59,7 +59,7 @@ instance HasErrorContext (GenExp PreTyped) Type where
   mkErrorContext = ErrorCtxGenExp
 instance HasErrorContext (Stmt PreTyped) () where
   mkErrorContext = ErrorCtxStmt
-instance HasErrorContext (GPriorStmt PreTyped) () where
+instance HasErrorContext (GPriorStmt PreTyped) Type where
   mkErrorContext = ErrorCtxGPStmt
 instance HasErrorContext (Pattern PreTyped) Type where
   mkErrorContext = ErrorCtxPattern
@@ -914,9 +914,16 @@ instance TypeCheckable () Stmt where
        return (stmt_t, ())
 
 
--- Type-checking and inference for gprior statements
-instance TypeCheckable () GPriorStmt where
-  typeCheck' (GPriorStmt lhs rhs) () =
+-- Type-checking and inference for gprior statements, where the "type" of a
+-- prior statement @src ~ d@ is @a@ iff @src@ has type @a@ and @d@ has type
+-- @Dist a@
+instance TypeCheckable Type GPriorStmt where
+  typeCheck' stmt tp =
+    do (stmt_t, tp') <- typeInfer' stmt
+       unify tp tp'
+       return stmt_t
+
+  typeInfer' (GPriorStmt lhs rhs) =
     do
       -- First, infer the type of the distribution
       (rhs_t, rhs_type) <- typeInfer rhs
@@ -925,11 +932,7 @@ instance TypeCheckable () GPriorStmt where
       -- Now type-check the left-hand side against the distribution type
       lhs_t <- typeCheck lhs vtp
       -- Finally, check the body in ctx, with the vars in vctx marked as sampled
-      zonk $ GPriorStmt lhs_t rhs_t
-
-  typeInfer' stmt =
-    do stmt_t <- typeCheck' stmt ()
-       return (stmt_t, ())
+      return (GPriorStmt lhs_t rhs_t, vtp)
 
 instance TypeCheckable Type SourceExp where
   typeInfer' _ =
@@ -1356,10 +1359,9 @@ instance TypeCheckable () Decl where
   typeCheck' (SourceDecl name tp sexp) () = do
     sd <- SourceDecl name tp <$> typeCheck sexp tp
     zonk sd
-  typeCheck' (MainDecl gprior (AppliedInfMethod name args)) () = do
-    gprior_tp <- typeCheck gprior ()
-    params_tp <- sequence [ typeCheck' e (ipType p)
-                          | e <- args
-                          | p <- imParams name
-                          ]
-    zonk (MainDecl gprior_tp (AppliedInfMethod name params_tp))
+  typeCheck' (MainDecl gprior (AppliedInfMethod meth args)) () = do
+    (gprior_tp, tp) <- typeInfer gprior
+    let param_tps =
+          map (tpSubst (singleTVSubst (TVar 0) tp) . ipType) (imParams meth)
+    params_tp <- zipWithM typeCheck' args param_tps
+    zonk (MainDecl gprior_tp (AppliedInfMethod meth params_tp))
