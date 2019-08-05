@@ -13,9 +13,13 @@
 
 module Language.Grappa.Interp.ProbFun where
 
+import Data.Vector (Vector)
+import Data.Functor.Compose
+
 import Language.Grappa.Distribution
 import Language.Grappa.Interp
 import Language.Grappa.GrappaInternals
+import Language.Grappa.Interp.PVIE
 import GHC.Exts (IsList(..))
 
 -- | Type tag for the representation that views @'Dist' a@ as a function from
@@ -26,7 +30,10 @@ type family ProbFunReprF a where
   ProbFunReprF (a -> b) = (ProbFunReprF a -> ProbFunReprF b)
   ProbFunReprF (Dist a) = ProbFunReprF a -> Prob
   ProbFunReprF (ADT adt) = adt (GExpr ProbFunRepr) (ADT adt)
-  ProbFunReprF a       = a
+  ProbFunReprF (Vector a) = Vector (ProbFunReprF a)
+  ProbFunReprF (VIDist a) = (VIDistFamExpr (ProbFunReprF a))
+  ProbFunReprF VISize = VIDim
+  ProbFunReprF a = a
 
 instance ValidExprRepr ProbFunRepr where
   type GExprRepr ProbFunRepr a = ProbFunReprF a
@@ -346,3 +353,48 @@ instance Interp__adtDist__ListF ProbFunRepr where
     case xs of
       Nil -> probNil * dNil Tuple0
       Cons x xs' -> probCons * dCons (Tuple2 x xs')
+
+
+----------------------------------------------------------------------
+-- Interpreting VI Distribution Families
+----------------------------------------------------------------------
+
+instance Interp__withVISize ProbFunRepr where
+  interp__withVISize = GExpr $ \f -> bindVIDimFamExpr f
+
+instance Interp__viNormal ProbFunRepr where
+  interp__viNormal = GExpr normalVIFamExpr
+
+instance Interp__viUniform ProbFunRepr where
+  interp__viUniform = GExpr uniformVIFamExpr
+
+instance Interp__viCategorical ProbFunRepr where
+  interp__viCategorical = GExpr categoricalVIFamExpr
+
+instance Interp__viTuple0 ProbFunRepr where
+  interp__viTuple0 = GExpr $ tupleVIFamExpr Tuple0
+
+instance Interp__viTuple1 ProbFunRepr a where
+  interp__viTuple1 = GExpr $ \da ->
+    tupleVIFamExpr (Tuple1 $ Compose $ xformVIDistFamExpr GExpr unGExpr da)
+
+instance Interp__viTuple2 ProbFunRepr a b where
+  interp__viTuple2 = GExpr $ \da db ->
+    tupleVIFamExpr (Tuple2
+                    (Compose $ xformVIDistFamExpr GExpr unGExpr da)
+                    (Compose $ xformVIDistFamExpr GExpr unGExpr db))
+
+instance Interp__viTuple3 ProbFunRepr a b c where
+  interp__viTuple3 = GExpr $ \da db dc ->
+    tupleVIFamExpr (Tuple3
+                    (Compose $ xformVIDistFamExpr GExpr unGExpr da)
+                    (Compose $ xformVIDistFamExpr GExpr unGExpr db)
+                    (Compose $ xformVIDistFamExpr GExpr unGExpr dc))
+
+instance Interp__viTuple4 ProbFunRepr a b c d where
+  interp__viTuple4 = GExpr $ \da db dc dd ->
+    tupleVIFamExpr (Tuple4
+                    (Compose $ xformVIDistFamExpr GExpr unGExpr da)
+                    (Compose $ xformVIDistFamExpr GExpr unGExpr db)
+                    (Compose $ xformVIDistFamExpr GExpr unGExpr dc)
+                    (Compose $ xformVIDistFamExpr GExpr unGExpr dd))

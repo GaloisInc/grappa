@@ -17,6 +17,7 @@ module Language.Grappa.Interp where
 
 import Data.Proxy
 import Data.Maybe
+import Data.Vector (Vector)
 import qualified Numeric.Log as Log
 
 -- import qualified Numeric.AD.Mode.Forward as ADF
@@ -751,6 +752,50 @@ gtrace i a b = trace ("gtrace " ++ show i ++ ": " ++ show a) b
 -- | Typeclass for interpreting 'gtrace'
 class (ValidExprRepr repr, Show a) => Interp__gtrace repr a b where
   interp__gtrace :: GExpr repr (Int -> a -> b -> b)
+
+
+----------------------------------------------------------------------
+-- * Typeclasses for Interpreting Distribution Families in Grappa
+----------------------------------------------------------------------
+
+-- | The Grappa type of size expressions used in VI distribution families
+data VISize
+
+-- | The Grappa type of VI distribution families
+data VIDist a
+
+class ValidExprRepr repr => Interp__withVISize repr where
+  interp__withVISize :: GExpr repr ((VISize -> VIDist a) -> VIDist a)
+
+class ValidExprRepr repr => Interp__viNormal repr where
+  interp__viNormal :: GExpr repr (VIDist Double)
+
+class ValidExprRepr repr => Interp__viUniform repr where
+  interp__viUniform :: GExpr repr (VIDist Double)
+
+class ValidExprRepr repr => Interp__viCategorical repr where
+  interp__viCategorical :: GExpr repr (VISize -> VIDist Int)
+
+class ValidExprRepr repr => Interp__viTuple0 repr where
+  interp__viTuple0 :: GExpr repr (VIDist (GTuple '[]))
+
+class ValidExprRepr repr => Interp__viTuple1 repr a where
+  interp__viTuple1 :: GExpr repr (VIDist a -> VIDist (GTuple '[a]))
+
+class ValidExprRepr repr => Interp__viTuple2 repr a b where
+  interp__viTuple2 :: GExpr repr (VIDist a -> VIDist b ->
+                                  VIDist (GTuple '[a, b]))
+
+class ValidExprRepr repr => Interp__viTuple3 repr a b c where
+  interp__viTuple3 :: GExpr repr (VIDist a -> VIDist b -> VIDist c ->
+                                  VIDist (GTuple '[a, b, c]))
+
+class ValidExprRepr repr => Interp__viTuple4 repr a b c d where
+  interp__viTuple4 :: GExpr repr (VIDist a -> VIDist b -> VIDist c ->
+                                  VIDist d -> VIDist (GTuple '[a, b, c, d]))
+
+class ValidExprRepr repr => Interp__viIID repr a where
+  interp__viIID :: GExpr repr (VISize -> VIDist a -> VIDist (Vector a))
 
 
 ----------------------------------------------------------------------

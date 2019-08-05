@@ -32,6 +32,7 @@ import qualified Data.Reflection as ADR (Reifies)
 
 import Language.Grappa.Distribution
 import Language.Grappa.GrappaInternals
+import Language.Grappa.Interp
 
 import Language.Grappa.Rand.MWCRandM
 import qualified System.Random.MWC as MWC
@@ -341,8 +342,8 @@ categoricalVIFamExpr dim =
         log (ps V.! x))
 
 -- | Bind a fresh dimensionality variable in a distribution family expression
-bindDimVIFamExpr :: (VIDim -> VIDistFamExpr a) -> VIDistFamExpr a
-bindDimVIFamExpr f =
+bindVIDimFamExpr :: (VIDim -> VIDistFamExpr a) -> VIDistFamExpr a
+bindVIDimFamExpr f =
   VIDistFamExpr $ do
   v <- get
   put $ nextVar v
