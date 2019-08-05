@@ -471,7 +471,7 @@ num_samples = 100
 
 -- FIXME HERE: call this something more meaningful!
 elbo_with_grad :: MWC.GenIO -> VIDistFam a -> (a -> Double) -> VIDimAsgn ->
-                    (Params -> MutParams -> IO Double)
+                  (Params -> MutParams -> IO Double)
 elbo_with_grad g d log_p asgn params grad =
   do samples <-
        replicateM num_samples (runRand g $ viDistSample d asgn params)
