@@ -40,6 +40,8 @@ import Language.Grappa.Interp.UntypedAST
 import Language.Grappa.Interp.BayesNet
 import Language.Grappa.Interp.CRepr
 import Language.Grappa.Interp.CExpr
+import Language.Grappa.Interp.ProbFun
+import Language.Grappa.Interp.PVIE hiding (runSamplingM)
 import Language.Grappa.Rand.MWCRandM
 
 import Language.Grappa.Inference.Util
@@ -317,6 +319,31 @@ cdpmMethod = InferenceMethod
   , imModelCopies = 1
   }
 
+runPVIE :: GExpr ProbFunRepr (VIDist a) ->
+           GExpr ProbFunRepr (Dist a) -> IO ()
+runPVIE (unGExpr -> dist_expr) (unGExpr -> log_p) =
+  do let dist_fam = evalVIDistFamExpr dist_expr
+     (asgn, params, val) <- pvie dist_fam (probToLogR . log_p)
+     pp <- applyPPFun (viDistPP dist_fam) asgn params
+     putStr $ show pp
+     putStrLn ("Surprisal score: " ++ show val)
+
+pvieMethod :: InferenceMethod
+pvieMethod = InferenceMethod
+  { imName = "pvie"
+  , imDescription = "Prototype Variational Inference Engine"
+  , imParams =
+    [ InferenceParam "dist_fam" "The distribution family to fit to the model"
+      -- FIXME: make the following a nice way to write "VIDist a"
+      (BaseType
+       (TypeNameInfo
+        { tn_th_name = ''VIDist, tn_arity = 1, tn_ctors = Nothing })
+       [VarType (TVar 0)])
+    ]
+  , imRunFunc = 'runPVIE
+  , imModelCopies = 1
+  }
+
 allMethods :: [InferenceMethod]
 allMethods =
   [ priorMethod
@@ -327,6 +354,7 @@ allMethods =
   , gradientDescentMethod
   , pythonMethod
   , cdpmMethod
+  , pvieMethod
   ]
 
 findMethod :: Text -> Maybe InferenceMethod
