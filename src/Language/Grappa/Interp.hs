@@ -773,6 +773,9 @@ class ValidExprRepr repr => Interp__viNormal repr where
 class ValidExprRepr repr => Interp__viUniform repr where
   interp__viUniform :: GExpr repr (VIDist Double)
 
+class ValidExprRepr repr => Interp__viDelta repr a where
+  interp__viDelta :: GExpr repr (a -> VIDist a)
+
 class ValidExprRepr repr => Interp__viCategorical repr where
   interp__viCategorical :: GExpr repr (VISize -> VIDist Int)
 
@@ -796,6 +799,9 @@ class ValidExprRepr repr => Interp__viTuple4 repr a b c d where
 
 class ValidExprRepr repr => Interp__viIID repr a where
   interp__viIID :: GExpr repr (VISize -> VIDist a -> VIDist (Vector a))
+
+class ValidExprRepr repr => Interp__viJSONInput repr a where
+  interp__viJSONInput :: GExpr repr (VIDist a)
 
 
 ----------------------------------------------------------------------

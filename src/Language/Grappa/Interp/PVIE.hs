@@ -24,6 +24,10 @@ import qualified Numeric.Log as Log
 import Foreign.Ptr
 import Foreign.ForeignPtr
 
+import qualified Data.ByteString.Lazy as BS
+import Data.Aeson
+import System.IO
+
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
@@ -481,11 +485,11 @@ iidVIFam len d =
 -- | An "expression" for building up a family of distributions, which keeps
 -- track of how many dimensionality variables we have used so far
 newtype VIDistFamExpr a =
-  VIDistFamExpr { runVIDistFamExpr :: State VIDimVar (VIDistFam a) }
+  VIDistFamExpr { runVIDistFamExpr :: StateT VIDimVar IO (VIDistFam a) }
 
 -- | Evaluate a distribution family expression into a distribution family
-evalVIDistFamExpr :: VIDistFamExpr a -> VIDistFam a
-evalVIDistFamExpr (VIDistFamExpr m) = evalState m (VIDimVar 0)
+evalVIDistFamExpr :: VIDistFamExpr a -> IO (VIDistFam a)
+evalVIDistFamExpr (VIDistFamExpr m) = evalStateT m (VIDimVar 0)
 
 -- | Build a distribution family expression for a "simple" distribution, meaning
 -- it is not a composite of multiple distributions on sub-components.  Such a
@@ -523,7 +527,6 @@ uniformVIFamExpr =
        && fromDouble x <= max (ps V.! 0) (ps V.! 1) then
       log $ abs (ps V.! 1 - ps V.! 0)
     else log 0)
-
 
 -- | Build a distribution family expression for the categorical distribution
 -- over @[0,..,n-1]@ with relative probabilities @[a1,..,an]@, with the special
@@ -568,6 +571,21 @@ xformVIDistFamExpr f_to f_from expr =
 iidVIFamExpr :: VIDim -> VIDistFamExpr a -> VIDistFamExpr (Vector a)
 iidVIFamExpr len d_expr =
   VIDistFamExpr (iidVIFam len <$> runVIDistFamExpr d_expr)
+
+-- | This distribution family is a delta distribution (i.e., one that always
+-- returns the same value, like 'deltaVIFamExpr') that reads its input from
+-- stdin as a JSON file
+readJSONVIDistFamExpr :: (Eq a, FromJSON a) => VIDistFamExpr a
+readJSONVIDistFamExpr =
+  VIDistFamExpr $
+  do contents <- liftIO $ BS.hGetContents stdin
+     case eitherDecode' contents of
+       Left err -> error ("Could not parse JSON input: " ++ err)
+       Right a ->
+         runVIDistFamExpr $
+         simpleVIFamExpr ("JSONData")
+         0 (\_ -> return a) (\_ -> 0)
+         (\x _ -> if x == a then 0 else log 0)
 
 
 ----------------------------------------------------------------------

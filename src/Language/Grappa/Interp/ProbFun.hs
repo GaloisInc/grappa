@@ -15,6 +15,7 @@ module Language.Grappa.Interp.ProbFun where
 
 import Data.Vector (Vector)
 import Data.Functor.Compose
+import Data.Aeson
 
 import Language.Grappa.Distribution
 import Language.Grappa.Interp
@@ -370,6 +371,14 @@ instance Interp__viUniform ProbFunRepr where
 
 instance Interp__viCategorical ProbFunRepr where
   interp__viCategorical = GExpr categoricalVIFamExpr
+
+instance (Eq (ProbFunReprF a), Show (ProbFunReprF a)) =>
+         Interp__viDelta ProbFunRepr a where
+  interp__viDelta = GExpr deltaVIFamExpr
+
+instance (Eq (ProbFunReprF a), FromJSON (ProbFunReprF a)) =>
+         Interp__viJSONInput ProbFunRepr a where
+  interp__viJSONInput = GExpr readJSONVIDistFamExpr
 
 instance Interp__viTuple0 ProbFunRepr where
   interp__viTuple0 = GExpr $ tupleVIFamExpr Tuple0
