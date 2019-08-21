@@ -632,10 +632,11 @@ pvie_epsilon = 1.0e-6
 num_samples :: Int
 num_samples = 100
 
--- FIXME HERE: call this something more meaningful!
+-- | Compute the Evidence Lower BOund (or ELBO) and its gradient
 elbo_with_grad :: MWC.GenIO -> VIDistFam a -> (a -> Double) -> VIDimAsgn ->
                   (Params -> MutParams -> IO Double)
 elbo_with_grad g d log_p asgn params grad =
+  trace ("elbo_with_grad: params = " ++ show params) $
   do samples <-
        replicateM num_samples (runSamplingM (viDistSample d) g asgn params)
      let n = fromIntegral num_samples
@@ -643,7 +644,11 @@ elbo_with_grad g d log_p asgn params grad =
      forM_ samples $ \samp ->
        runParamsGradM (viDistScaledGradPDF d (log_p samp / n) samp)
        asgn params grad
-     return (entr - (1/n) * sum (map log_p samples))
+     grad_const <- SV.unsafeFreeze grad
+     traceM ("grad = " ++ show grad_const)
+     let ret = (entr - (1/n) * sum (map log_p samples))
+     traceM ("surprisal = " ++ show ret)
+     return ret
 
 pvie :: VIDistFam a -> (a -> Double) -> IO (VIDimAsgn, Params, Double)
 pvie d log_p = init_pvie where
@@ -657,7 +662,7 @@ pvie d log_p = init_pvie where
     -- Allocate and initialize our mutable params
     mut_params <- SMV.new (evalVIDim (viDistDim d) asgn)
     -- FIXME HERE: have VIDistFams initialize their mut_params
-    SMV.set mut_params 0
+    SMV.set mut_params 1
     -- Generate the initial value to try to beat
     val <- optimize (elbo_with_grad g d log_p asgn) mut_params
     params <- SV.unsafeFreeze mut_params
