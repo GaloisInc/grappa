@@ -25,7 +25,7 @@ public:
 };
 
 // External entrypoint to call LBFGS++
-extern "C" double optimize_lbfgs (optfun f, uint32_t size, double *init_xs) {
+extern "C" double optimize_lbfgs (uint32_t size, optfun f, double *init_xs) {
   // Set up parameters
   LBFGSParam<double> param;
   param.epsilon = 1e-6;

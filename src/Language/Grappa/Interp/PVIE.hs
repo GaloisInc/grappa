@@ -48,6 +48,8 @@ import qualified System.Random.MWC.Distributions as MWC
 import qualified Text.PrettyPrint.ANSI.Leijen as PP
 import Text.PrettyPrint.ANSI.Leijen ((<+>), (<>))
 
+import Debug.Trace
+
 
 ----------------------------------------------------------------------
 -- * Dimensionality Expressions
@@ -593,18 +595,18 @@ readJSONVIDistFamExpr =
 ----------------------------------------------------------------------
 
 -- | The type of FFI-compatible functions that we can optimize
-type FFIOptFun = Int -> Ptr Double -> Ptr Double -> IO Double
-
-foreign import ccall "optimize_lbfgs" optimize_lbfgs
-  :: Int -> FunPtr FFIOptFun -> Ptr Double -> IO Double
+type FFIOptFun = Ptr Double -> Ptr Double -> IO Double
 
 foreign import ccall "wrapper" wrapFFIOptFun
   :: FFIOptFun -> IO (FunPtr FFIOptFun)
 
-createFFIOptFun :: (Params -> MutParams -> IO Double) ->
+foreign import ccall "optimize_lbfgs" optimize_lbfgs
+  :: Int -> FunPtr FFIOptFun -> Ptr Double -> IO Double
+
+createFFIOptFun :: Int -> (Params -> MutParams -> IO Double) ->
                    IO (FunPtr FFIOptFun)
-createFFIOptFun f =
-  wrapFFIOptFun $ \len params_ptr grad_ptr ->
+createFFIOptFun len f =
+  wrapFFIOptFun $ \params_ptr grad_ptr ->
   do params_frgnptr <- newForeignPtr_ params_ptr
      let params = SV.unsafeFromForeignPtr0 params_frgnptr len
      grad_frgnptr <- newForeignPtr_ grad_ptr
@@ -613,9 +615,10 @@ createFFIOptFun f =
 
 optimize :: (Params -> MutParams -> IO Double) -> MutParams -> IO Double
 optimize f mut_params =
-  do f_ptr <- createFFIOptFun f
+  do let len = SMV.length mut_params
+     f_ptr <- createFFIOptFun len f
      val <- SMV.unsafeWith mut_params
-       (\params_ptr -> optimize_lbfgs (SMV.length mut_params) f_ptr params_ptr)
+       (\params_ptr -> optimize_lbfgs len f_ptr params_ptr)
      freeHaskellFunPtr f_ptr
      return val
 
