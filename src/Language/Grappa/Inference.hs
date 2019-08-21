@@ -325,7 +325,7 @@ runPVIE (unGExpr -> dist_expr) _ (unGExpr -> log_p) =
   do dist_fam <- evalVIDistFamExpr dist_expr
      (asgn, params, val) <- pvie dist_fam (probToLogR . log_p)
      pp <- applyPPFun (viDistPP dist_fam) asgn params
-     putStr $ show pp
+     putStrLn $ show pp
      putStrLn ("Surprisal score: " ++ show val)
 
 pvieMethod :: InferenceMethod
