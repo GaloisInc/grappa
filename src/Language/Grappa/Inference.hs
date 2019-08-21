@@ -319,9 +319,9 @@ cdpmMethod = InferenceMethod
   , imModelCopies = 1
   }
 
-runPVIE :: Source a -> GExpr ProbFunRepr (VIDist a) ->
+runPVIE :: GExpr ProbFunRepr (VIDist a) -> Source a ->
            GExpr ProbFunRepr (Dist a) -> IO ()
-runPVIE _ (unGExpr -> dist_expr) (unGExpr -> log_p) =
+runPVIE (unGExpr -> dist_expr) _ (unGExpr -> log_p) =
   do dist_fam <- evalVIDistFamExpr dist_expr
      (asgn, params, val) <- pvie dist_fam (probToLogR . log_p)
      pp <- applyPPFun (viDistPP dist_fam) asgn params
