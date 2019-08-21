@@ -18,6 +18,7 @@ module Language.Grappa.Interp where
 import Data.Proxy
 import Data.Maybe
 import Data.Vector (Vector)
+import Data.Aeson
 import qualified Numeric.Log as Log
 
 -- import qualified Numeric.AD.Mode.Forward as ADF
@@ -48,6 +49,12 @@ instance GrappaShow (GExprRepr repr a) => GrappaShow (GExpr repr a) where
 instance GrappaShowListContents (GExprRepr repr a) =>
          GrappaShowListContents (GExpr repr a) where
   showListContents (GExpr x) = showListContents x
+
+instance Eq (GExprRepr repr a) => Eq (GExpr repr a) where
+  e1 == e2 = unGExpr e1 == unGExpr e2
+
+instance FromJSON (GExprRepr repr a) => FromJSON (GExpr repr a) where
+  parseJSON v = GExpr <$> parseJSON v
 
 
 ----------------------------------------------------------------------
