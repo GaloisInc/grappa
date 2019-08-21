@@ -13,6 +13,11 @@ import Data.Functor.Const
 import Data.Proxy (Proxy(..))
 import GHC.Exts (Constraint, IsList(..))
 
+import Data.Aeson
+import Data.Aeson.Types (Parser)
+import Data.Vector (Vector)
+import qualified Data.Vector as V
+
 import Language.Grappa.Distribution
 
 
@@ -332,6 +337,39 @@ data TupleF (ts :: [*]) f (r :: *) where
   TupleN :: f a -> f b -> f c -> f d -> f e -> TupleF rest f r ->
             TupleF (a ': b ': c ': d ': e ': rest) f r
 
+type family TupleConstraintF (cf :: * -> Constraint) (f :: * -> *)
+     (ts :: [*]) :: Constraint where
+  TupleConstraintF cf f '[] = ()
+  TupleConstraintF cf f '[a] = (cf (f a))
+  TupleConstraintF cf f '[a,b] = (cf (f a), cf (f b))
+  TupleConstraintF cf f '[a,b,c] = (cf (f a), cf (f b), cf (f c))
+  TupleConstraintF cf f '[a,b,c,d] = (cf (f a), cf (f b), cf (f c), cf (f d))
+  TupleConstraintF cf f (a ': b ': c ': d ': e ': ts) =
+    (cf (f a), cf (f b), cf (f c), cf (f d), cf (f e),
+     TupleConstraintF cf f ts)
+
+deriving instance TupleConstraintF Eq f ts => Eq (TupleF ts f r)
+
+instance (IsTypeList ts, TupleConstraintF FromJSON f ts) =>
+         FromJSON (TupleF ts f r) where
+  parseJSON = withArray "Grappa tuple" (helper typeListProxy) where
+    helper :: TupleConstraintF FromJSON f ts' => TupleF ts' Proxy r ->
+              Vector Value -> Parser (TupleF ts' f r)
+    helper Tuple0 _ = return Tuple0
+    helper (Tuple1 _) vals = Tuple1 <$> parseJSON (vals V.! 0)
+    helper (Tuple2 _ _) vals =
+      Tuple2 <$> parseJSON (vals V.! 0) <*> parseJSON (vals V.! 1)
+    helper (Tuple3 _ _ _) vals =
+      Tuple3 <$> parseJSON (vals V.! 0) <*> parseJSON (vals V.! 1)
+      <*> parseJSON (vals V.! 2)
+    helper (Tuple4 _ _ _ _) vals =
+      Tuple4 <$> parseJSON (vals V.! 0) <*> parseJSON (vals V.! 1)
+      <*> parseJSON (vals V.! 2) <*> parseJSON (vals V.! 3)
+    helper (TupleN _ _ _ _ _ tup) vals =
+      TupleN <$> parseJSON (vals V.! 0) <*> parseJSON (vals V.! 1)
+      <*> parseJSON (vals V.! 2) <*> parseJSON (vals V.! 3)
+      <*> parseJSON (vals V.! 4) <*> helper tup (V.drop 5 vals)
+
 -- | This says that @ts@ is a well-formed list of types, that we can reflect on
 class IsTypeList ts where
   typeListProxy :: TupleF ts Proxy r
@@ -566,6 +604,13 @@ instance GrappaType a => GrappaType (ADT (ListF a)) where
     GrappaADTType (GrappaTypeAppApply GrappaTypeAppBase grappaTypeRepr)
 
 --deriving instance (Show (f a), Show (f r)) => Show (ListF a f r)
+
+deriving instance (Eq (f a), Eq (f r)) => Eq (ListF a f r)
+
+instance (FromJSON (f a), FromJSON (f r)) => FromJSON (ListF a f r) where
+  parseJSON = withArray "Grappa list" $ \vals ->
+    if V.null vals then return Nil else
+      Cons <$> parseJSON (V.head vals) <*> parseJSON (Array $ V.tail vals)
 
 -- Need a TraversableADT instance for each ADT type
 instance TraversableADT (ListF a) where

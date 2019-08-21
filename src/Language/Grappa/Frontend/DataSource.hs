@@ -297,6 +297,7 @@ instance (IsTypeList ts, Aeson.FromJSON (TupleF ts GrappaData (GTuple ts))) =>
 
 -- NOTE: we only add the empty parsing case for tuples at the top level
 
+{-
 -- JSON parsing for parsing nullary Grappa tuples
 instance Aeson.FromJSON (TupleF '[] GrappaData r) where
   parseJSON _ = return Tuple0
@@ -337,6 +338,7 @@ instance Aeson.FromJSON (GrappaData a) =>
          Aeson.FromJSON (GrappaData (GList a)) where
   parseJSON =
     addEmptyJSONCase (fmap vecToGData . Aeson.parseJSON)
+-}
 
 instance Aeson.FromJSON Unused where
   parseJSON _ = return Unused
