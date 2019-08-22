@@ -632,21 +632,21 @@ pvie_epsilon = 1.0e-6
 num_samples :: Int
 num_samples = 100
 
--- | Compute the Evidence Lower BOund (or ELBO) and its gradient
-elbo_with_grad :: MWC.GenIO -> VIDistFam a -> (a -> Double) -> VIDimAsgn ->
-                  (Params -> MutParams -> IO Double)
-elbo_with_grad g d log_p asgn params grad =
-  trace ("elbo_with_grad: params = " ++ show params) $
+-- | Compute the negative Evidence Lower BOund (or ELBO) and its gradient
+neg_elbo_with_grad :: MWC.GenIO -> VIDistFam a -> (a -> Double) -> VIDimAsgn ->
+                      (Params -> MutParams -> IO Double)
+neg_elbo_with_grad g d log_p asgn params grad =
+  trace ("neg_elbo_with_grad: params = " ++ show params) $
   do samples <-
        replicateM num_samples (runSamplingM (viDistSample d) g asgn params)
      let n = fromIntegral num_samples
      entr <- runParamsGradM (viDistEntropy d) asgn params grad
      forM_ samples $ \samp ->
-       runParamsGradM (viDistScaledGradPDF d (log_p samp / n) samp)
+       runParamsGradM (viDistScaledGradPDF d (-(log_p samp / n)) samp)
        asgn params grad
      grad_const <- SV.unsafeFreeze grad
      traceM ("grad = " ++ show grad_const)
-     let ret = (entr - (1/n) * sum (map log_p samples))
+     let ret = ((1/n) * sum (map log_p samples) - entr)
      traceM ("surprisal = " ++ show ret)
      return ret
 
@@ -664,7 +664,7 @@ pvie d log_p = init_pvie where
     -- FIXME HERE: have VIDistFams initialize their mut_params
     SMV.set mut_params 1
     -- Generate the initial value to try to beat
-    val <- optimize (elbo_with_grad g d log_p asgn) mut_params
+    val <- optimize (neg_elbo_with_grad g d log_p asgn) mut_params
     params <- SV.unsafeFreeze mut_params
     -- If there are no dimensionality variables in our distribution family, then
     -- there is nothing to increment, so we are done
@@ -715,7 +715,7 @@ pvie d log_p = init_pvie where
     -- Copy our current best parameters into our scratch area
     runGrowM (viDistGrowParams d) asgn new_asgn last_params scratch
     -- Optimize those parameters
-    new_val <- optimize (elbo_with_grad g d log_p asgn) scratch
+    new_val <- optimize (neg_elbo_with_grad g d log_p asgn) scratch
     -- Test how much we improved
     if last_val - new_val >= pvie_epsilon then
       -- If we did improve, swap last_params and scratch, then iterate
