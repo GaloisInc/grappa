@@ -12,7 +12,7 @@ import Control.Monad
 import Control.Monad.Trans
 import GHC.Exts
 import Data.Typeable
-import Numeric.LinearAlgebra hiding (R, Uniform)
+import Numeric.LinearAlgebra hiding (R, Uniform, (<>))
 import qualified Data.Vector.Storable as V
 --import Data.Number.LogFloat hiding (sum, product, log)
 

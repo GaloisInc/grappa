@@ -145,6 +145,9 @@ foldBNVars f z vars =
   flip (IntSet.foldr (f . BNVar BNTypeUnit)) (bnVarsUnitVars vars) $
   z
 
+instance Semigroup BNVars where
+  (<>) = mappend
+
 instance Monoid BNVars where
   mempty = emptyBNVars
   mappend = unionBNVars
