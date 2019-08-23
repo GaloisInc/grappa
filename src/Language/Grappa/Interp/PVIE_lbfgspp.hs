@@ -30,9 +30,7 @@ import System.IO
 
 import Data.Vector (Vector)
 import qualified Data.Vector as V
--- import qualified Data.Vector.Storable as SV
-import qualified Numeric.LinearAlgebra.Data as SV (Vector)
-import qualified Data.Vector.Generic as SV hiding (Vector)
+import qualified Data.Vector.Storable as SV
 import qualified Data.Vector.Storable.Mutable as SMV
 
 import qualified Numeric.AD.Mode.Reverse as ADR
@@ -610,7 +608,7 @@ createFFIOptFun :: Int -> (Params -> MutParams -> IO Double) ->
 createFFIOptFun len f =
   wrapFFIOptFun $ \params_ptr grad_ptr ->
   do params_frgnptr <- newForeignPtr_ params_ptr
-     let params = error "FIXME HERE NOW" -- SV.unsafeFromForeignPtr0 params_frgnptr len
+     let params = SV.unsafeFromForeignPtr0 params_frgnptr len
      grad_frgnptr <- newForeignPtr_ grad_ptr
      let grad = SMV.unsafeFromForeignPtr0 grad_frgnptr len
      f params grad
