@@ -27,15 +27,19 @@ import Foreign.ForeignPtr
 import qualified Data.ByteString.Lazy as BS
 import Data.Aeson
 import System.IO
+import System.IO.Unsafe
 
 import Data.Vector (Vector)
 import qualified Data.Vector as V
-import qualified Data.Vector.Storable as SV
+import qualified Numeric.LinearAlgebra.Data as SV (Vector)
+import qualified Data.Vector.Generic as SV hiding (Vector)
 import qualified Data.Vector.Storable.Mutable as SMV
 
 import qualified Numeric.AD.Mode.Reverse as ADR
 import qualified Numeric.AD.Internal.Reverse as ADR
 import qualified Data.Reflection as ADR (Reifies)
+
+import Numeric.GSL.Minimization
 
 import Language.Grappa.Distribution
 import Language.Grappa.GrappaInternals
@@ -514,8 +518,8 @@ deltaVIFamExpr a =
 -- we use absolute value of @sigma@ to map it to the non-negative reals
 normalVIFamExpr :: VIDistFamExpr R
 normalVIFamExpr =
-  simpleVIFamExpr "Normal" 2 (\ps -> mwcNormal (ps SV.! 0) (ps SV.! 1))
-  (\ps -> 0.5 * (1 + log (2 * pi)) + log (ps V.! 1))
+  simpleVIFamExpr "Normal" 2 (\ps -> mwcNormal (ps SV.! 0) (abs (ps SV.! 1)))
+  (\ps -> 0.5 * (1 + log (2 * pi) + log ((ps V.! 1) * (ps V.! 1))))
   (\x ps -> Log.ln $ normalDensityUnchecked (ps V.! 0) (abs (ps V.! 1)) (fromDouble x))
 
 -- | Build a distribution family expression for the uniform distribution over
@@ -594,33 +598,30 @@ readJSONVIDistFamExpr =
 -- * Variational Inference, Yay!
 ----------------------------------------------------------------------
 
--- | The type of FFI-compatible functions that we can optimize
-type FFIOptFun = Ptr Double -> Ptr Double -> IO Double
-
-foreign import ccall "wrapper" wrapFFIOptFun
-  :: FFIOptFun -> IO (FunPtr FFIOptFun)
-
-foreign import ccall "optimize_lbfgs" optimize_lbfgs
-  :: Int -> FunPtr FFIOptFun -> Ptr Double -> IO Double
-
-createFFIOptFun :: Int -> (Params -> MutParams -> IO Double) ->
-                   IO (FunPtr FFIOptFun)
-createFFIOptFun len f =
-  wrapFFIOptFun $ \params_ptr grad_ptr ->
-  do params_frgnptr <- newForeignPtr_ params_ptr
-     let params = SV.unsafeFromForeignPtr0 params_frgnptr len
-     grad_frgnptr <- newForeignPtr_ grad_ptr
-     let grad = SMV.unsafeFromForeignPtr0 grad_frgnptr len
-     f params grad
-
+-- | Find the parameters that /minimize/ the given differentiable function
 optimize :: (Params -> MutParams -> IO Double) -> MutParams -> IO Double
 optimize f mut_params =
   do let len = SMV.length mut_params
-     f_ptr <- createFFIOptFun len f
-     val <- SMV.unsafeWith mut_params
-       (\params_ptr -> optimize_lbfgs len f_ptr params_ptr)
-     freeHaskellFunPtr f_ptr
-     return val
+     params <- SV.freeze mut_params
+     let eval_f ps =
+           trace ("neg_elbo: params = " ++ show ps) $
+           unsafePerformIO $
+           do grad <- SMV.replicate len 0
+              ret <- f ps grad
+              traceM ("surprisal = " ++ show ret)
+              return ret
+     let grad_f ps =
+           trace ("neg_elbo_grad: params = " ++ show ps) $
+           unsafePerformIO $
+           do grad <- SMV.replicate len 0
+              _ <- f ps grad
+              ret <- SV.unsafeFreeze grad
+              traceM ("grad = " ++ show ret)
+              return ret
+     let (opt_params,_) =
+           minimizeVD VectorBFGS2 0.0001 1000 1 0.1 eval_f grad_f params
+     SV.copy mut_params opt_params
+     return $ eval_f opt_params
 
 -- FIXME HERE: make VIDistFams know how to initialize their params
 
@@ -630,27 +631,39 @@ pvie_epsilon = 1.0e-6
 
 -- | FIXME: make this be a command-line option somehow!
 num_samples :: Int
-num_samples = 100
+num_samples = 1000
 
 -- | Compute the negative Evidence Lower BOund (or ELBO) and its gradient
-neg_elbo_with_grad :: MWC.GenIO -> VIDistFam a -> (a -> Double) -> VIDimAsgn ->
+neg_elbo_with_grad :: GrappaShow a => MWC.GenIO ->
+                      VIDistFam a -> (a -> Double) -> VIDimAsgn ->
                       (Params -> MutParams -> IO Double)
 neg_elbo_with_grad g d log_p asgn params grad =
-  trace ("neg_elbo_with_grad: params = " ++ show params) $
+  do ret <- elbo_with_grad g d log_p asgn params grad
+     forM_ [0 .. (SMV.length grad)-1] (SMV.modify grad negate)
+     return (-ret)
+
+-- | Compute the Evidence Lower BOund (or ELBO) and its gradient
+elbo_with_grad :: GrappaShow a => MWC.GenIO ->
+                  VIDistFam a -> (a -> Double) -> VIDimAsgn ->
+                  (Params -> MutParams -> IO Double)
+elbo_with_grad g d log_p asgn params grad =
+  -- trace ("neg_elbo_with_grad: params = " ++ show params) $
   do samples <-
        replicateM num_samples (runSamplingM (viDistSample d) g asgn params)
+     -- traceM ("samples: " ++ show (map grappaShow samples))
      let n = fromIntegral num_samples
      entr <- runParamsGradM (viDistEntropy d) asgn params grad
      forM_ samples $ \samp ->
-       runParamsGradM (viDistScaledGradPDF d (-(log_p samp / n)) samp)
+       runParamsGradM (viDistScaledGradPDF d (log_p samp / n) samp)
        asgn params grad
-     grad_const <- SV.unsafeFreeze grad
-     traceM ("grad = " ++ show grad_const)
-     let ret = ((1/n) * sum (map log_p samples) - entr)
-     traceM ("surprisal = " ++ show ret)
+     -- grad_const <- SV.unsafeFreeze grad
+     -- traceM ("grad = " ++ show grad_const)
+     let ret = entr + (1/n) * sum (map log_p samples)
+     -- traceM ("surprisal = " ++ show ret)
      return ret
 
-pvie :: VIDistFam a -> (a -> Double) -> IO (VIDimAsgn, Params, Double)
+pvie :: GrappaShow a => VIDistFam a -> (a -> Double) ->
+        IO (VIDimAsgn, Params, Double)
 pvie d log_p = init_pvie where
 
   -- Initialize PVIE and start it running
@@ -662,7 +675,7 @@ pvie d log_p = init_pvie where
     -- Allocate and initialize our mutable params
     mut_params <- SMV.new (evalVIDim (viDistDim d) asgn)
     -- FIXME HERE: have VIDistFams initialize their mut_params
-    SMV.set mut_params 1
+    SMV.set mut_params 0.001
     -- Generate the initial value to try to beat
     val <- optimize (neg_elbo_with_grad g d log_p asgn) mut_params
     params <- SV.unsafeFreeze mut_params

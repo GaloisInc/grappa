@@ -319,7 +319,8 @@ cdpmMethod = InferenceMethod
   , imModelCopies = 1
   }
 
-runPVIE :: GExpr ProbFunRepr (VIDist a) -> Source a ->
+runPVIE :: GrappaShow (ProbFunReprF a) =>
+           GExpr ProbFunRepr (VIDist a) -> Source a ->
            GExpr ProbFunRepr (Dist a) -> IO ()
 runPVIE (unGExpr -> dist_expr) _ (unGExpr -> log_p) =
   do dist_fam <- evalVIDistFamExpr dist_expr
