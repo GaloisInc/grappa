@@ -362,6 +362,9 @@ instance Interp__vec_iid ProbFunRepr where
       product $ V.map d xs
     else 0
 
+instance Interp__arbitrary ProbFunRepr a where
+  interp__arbitrary = GExpr $ \_ -> 1
+
 
 ----------------------------------------------------------------------
 -- Interpreting VI Distribution Families
