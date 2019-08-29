@@ -692,8 +692,9 @@ class ValidExprRepr repr => Interp__adtDist__ListF repr where
 class ValidExprRepr repr => Interp__list_iid repr where
   interp__list_iid :: GExpr repr (Dist a -> Dist (GList a))
 
--- class ValidExprRepr repr => Interp__vec_iid repr where
---   interp__vec_iid :: GExpr repr (Int -> Dist a -> Dist (Vec a))
+class ValidExprRepr repr => Interp__vec_iid repr where
+  interp__vec_iid :: GExpr repr (Int -> Dist a -> Dist (Vector a))
+
 
 ----------------------------------------------------------------------
 -- * Interpreting vectors and matrices

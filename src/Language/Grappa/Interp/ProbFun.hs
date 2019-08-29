@@ -14,6 +14,7 @@
 module Language.Grappa.Interp.ProbFun where
 
 import Data.Vector (Vector)
+import qualified Data.Vector as V
 import Data.Functor.Compose
 import Data.Aeson
 
@@ -354,6 +355,12 @@ instance Interp__adtDist__ListF ProbFunRepr where
     case xs of
       Nil -> probNil * dNil Tuple0
       Cons x xs' -> probCons * dCons (Tuple2 x xs')
+
+instance Interp__vec_iid ProbFunRepr where
+  interp__vec_iid = GExpr $ \n d xs ->
+    if V.length xs == n then
+      product $ V.map d xs
+    else 0
 
 
 ----------------------------------------------------------------------
