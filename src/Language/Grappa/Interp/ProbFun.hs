@@ -356,6 +356,20 @@ instance Interp__adtDist__ListF ProbFunRepr where
       Nil -> probNil * dNil Tuple0
       Cons x xs' -> probCons * dCons (Tuple2 x xs')
 
+
+----------------------------------------------------------------------
+-- Interpreting Vectors
+----------------------------------------------------------------------
+
+instance Interp__vec_head ProbFunRepr a where
+  interp__vec_head = GExpr V.head
+
+instance Interp__vec_tail ProbFunRepr a where
+  interp__vec_tail = GExpr V.tail
+
+instance Interp__vec_length ProbFunRepr a where
+  interp__vec_length = GExpr V.length
+
 instance Interp__vec_iid ProbFunRepr where
   interp__vec_iid = GExpr $ \n d xs ->
     if V.length xs == n then

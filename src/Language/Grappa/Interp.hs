@@ -692,6 +692,20 @@ class ValidExprRepr repr => Interp__adtDist__ListF repr where
 class ValidExprRepr repr => Interp__list_iid repr where
   interp__list_iid :: GExpr repr (Dist a -> Dist (GList a))
 
+
+-- | This is the reference measure on a set, i.e., the Lebesgue measure on the
+-- reals and the counting measure on any discrete set like the integers. This
+-- measure represents a distribution that chooses an arbitrary element of the
+-- type. Note that this is generally an improper probability distribution, i.e.,
+-- the probability of each element is 1, with infinite total probability.
+class ValidExprRepr repr => Interp__arbitrary repr a where
+  interp__arbitrary :: GExpr repr (Dist a)
+
+
+----------------------------------------------------------------------
+-- * Interpreting vectors and matrices
+----------------------------------------------------------------------
+
 class ValidExprRepr repr => Interp__vec_iid repr where
   interp__vec_iid :: GExpr repr (Int -> Dist a -> Dist (Vector a))
 
@@ -706,19 +720,14 @@ class ValidExprRepr repr => Interp__vec_cons_dist repr a where
   interp__vec_cons_dist :: GExpr repr (Dist (GTuple '[a, Vector a]) ->
                                        Dist (Vector a))
 
+class ValidExprRepr repr => Interp__vec_head repr a where
+  interp__vec_head :: GExpr repr (Vector a -> a)
 
--- | This is the reference measure on a set, i.e., the Lebesgue measure on the
--- reals and the counting measure on any discrete set like the integers. This
--- measure represents a distribution that chooses an arbitrary element of the
--- type. Note that this is generally an improper probability distribution, i.e.,
--- the probability of each element is 1, with infinite total probability.
-class ValidExprRepr repr => Interp__arbitrary repr a where
-  interp__arbitrary :: GExpr repr (Dist a)
+class ValidExprRepr repr => Interp__vec_tail repr a where
+  interp__vec_tail :: GExpr repr (Vector a -> Vector a)
 
-
-----------------------------------------------------------------------
--- * Interpreting vectors and matrices
-----------------------------------------------------------------------
+class ValidExprRepr repr => Interp__vec_length repr a where
+  interp__vec_length :: GExpr repr (Vector a -> Int)
 
 class (ValidExprRepr repr) => Interp__mv_normal repr where
   interp__mvNormal :: GExpr repr (RMatrix -> RMatrix -> Dist RMatrix)
