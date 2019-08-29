@@ -695,6 +695,18 @@ class ValidExprRepr repr => Interp__list_iid repr where
 class ValidExprRepr repr => Interp__vec_iid repr where
   interp__vec_iid :: GExpr repr (Int -> Dist a -> Dist (Vector a))
 
+-- | Build a distribution on 'Vector's from one on lists
+class ValidExprRepr repr => Interp__vec_dist repr a where
+  interp__vec_dist :: GExpr repr (Dist (GList a) -> Dist (Vector a))
+
+class ValidExprRepr repr => Interp__vec_nil_dist repr a where
+  interp__vec_nil_dist :: GExpr repr (Dist (Vector a))
+
+class ValidExprRepr repr => Interp__vec_cons_dist repr a where
+  interp__vec_cons_dist :: GExpr repr (Dist (GTuple '[a, Vector a]) ->
+                                       Dist (Vector a))
+
+
 -- | This is the reference measure on a set, i.e., the Lebesgue measure on the
 -- reals and the counting measure on any discrete set like the integers. This
 -- measure represents a distribution that chooses an arbitrary element of the

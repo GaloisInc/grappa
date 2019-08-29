@@ -362,6 +362,20 @@ instance Interp__vec_iid ProbFunRepr where
       product $ V.map d xs
     else 0
 
+{-
+instance Interp__vec_dist ProbFunRepr where
+  interp__vec_dist = GExpr $ \d xs -> d (V.toList xs)
+-}
+
+instance Interp__vec_nil_dist ProbFunRepr a where
+  interp__vec_nil_dist = GExpr $ \xs ->
+    if V.null xs then 1 else 0
+
+instance Interp__vec_cons_dist ProbFunRepr a where
+  interp__vec_cons_dist = GExpr $ \d xs ->
+    if V.null xs then 0 else
+      d (Tuple2 (GExpr $ V.head xs) (GExpr $ V.tail xs))
+
 instance Interp__arbitrary ProbFunRepr a where
   interp__arbitrary = GExpr $ \_ -> 1
 
