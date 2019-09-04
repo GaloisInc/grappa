@@ -62,7 +62,7 @@ instance ValidRepr ProbFunRepr where
   interp__'let rhs body = body rhs
   interp__'sample (GExpr d) (GVExpr v) k =
     -- FIXME: evaluate these two sides in parallel!
-    GStmt $ d v + unGStmt (k $ GExpr v)
+    GStmt $ d v * unGStmt (k $ GExpr v)
 
   interp__'mkDist f = GExpr (\ dv -> unGStmt $ f $ GVExpr dv)
 
