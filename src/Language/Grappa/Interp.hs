@@ -660,11 +660,17 @@ instance (Interp__gammaProb repr, Interp__probToLogReal repr) =>
 -- * Interpreting Distributions
 ----------------------------------------------------------------------
 
+class ValidExprRepr repr => Interp__delta repr a where
+  interp__delta :: GExpr repr (a -> Dist a)
+
 class ValidExprRepr repr => Interp__normal repr where
   interp__normal :: GExpr repr (R -> R -> Dist R)
 
 class ValidExprRepr repr => Interp__uniform repr where
   interp__uniform :: GExpr repr (R -> R -> Dist R)
+
+class ValidExprRepr repr => Interp__exponential repr where
+  interp__exponential :: GExpr repr (R -> Dist R)
 
 class ValidExprRepr repr => Interp__gamma repr where
   interp__gamma :: GExpr repr (R -> R -> Dist R)
@@ -706,7 +712,7 @@ class ValidExprRepr repr => Interp__arbitrary repr a where
 -- * Interpreting vectors and matrices
 ----------------------------------------------------------------------
 
-class ValidExprRepr repr => Interp__vec_iid repr where
+class ValidExprRepr repr => Interp__vec_iid repr a where
   interp__vec_iid :: GExpr repr (Int -> Dist a -> Dist (Vector a))
 
 -- | Build a distribution on 'Vector's from one on lists
