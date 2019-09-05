@@ -53,6 +53,11 @@ samplePrior stmt = runPriorM $ unGStmt stmt
 -- * Distributions
 ----------------------------------------------------------------------
 
+instance Interp__delta PriorRepr Int where
+  interp__delta = GExpr $ \i dv ->
+    matchHOReprAtomicDistVar dv (return . unGExpr)
+    (PriorM $ return i)
+
 instance Interp__normal PriorRepr where
   interp__normal = GExpr $ \ mu sigma dv ->
     matchHOReprAtomicDistVar dv (return . unGExpr)
@@ -63,13 +68,15 @@ instance Interp__uniform PriorRepr where
     matchHOReprAtomicDistVar dv (return . unGExpr)
     (PriorM $ random $ MWC.uniformR (lb, ub))
 
--- FIXME HERE: the following causes a GHC panic!
-{-
+instance Interp__exponential PriorRepr where
+  interp__exponential = GExpr $ \ rate dv ->
+    matchHOReprAtomicDistVar dv (return . unGExpr)
+    (PriorM $ mwcExponential rate)
+
 instance Interp__gamma PriorRepr where
   interp__gamma = GExpr $ \k theta dv ->
     matchHOReprAtomicDistVar dv (return . unGExpr)
     (PriorM $ random $ MWC.gamma k theta)
--}
 
 instance Interp__dirichlet PriorRepr where
   interp__dirichlet = GExpr $ \alphas_gexpr dv ->
