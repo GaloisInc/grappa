@@ -1,0 +1,57 @@
+
+--
+-- Model of inter-arrival times for events in a homogeneous Poisson process
+--
+
+model vec_map_dist_h d xs (0::Int) { ys } = ys ~ vec_nil_dist
+      vec_map_dist_h d xs len { ys } =
+        ys ~ vec_cons_dist
+          (model { y, ys2 } =
+             y ~ d (vec_head xs)
+             ys2 ~ vec_map_dist_h d (vec_tail xs) (len-1)
+           )
+
+model vec_map_dist d xs { ys } =
+  ys ~ vec_map_dist_h d xs (vec_length xs)
+
+
+-- A Poisson process is a random process that generates a sequence of events,
+-- each of which is described only by the time at which it happens. In a
+-- homogeneous Poisson procerss, this rate is constant over time. In this file,
+-- we model a Poisson process in terms of the inter-arrival times, i.e., the
+-- time between an event and the next event. These inter-arrival times are
+-- themselves independent random variables distributed according to an
+-- exponential distribution.
+
+model poisson_seq rate { len, deltas } =
+  len ~ arbitrary
+  -- len ~ delta 40
+  deltas ~ vec_iid len (exponential rate)
+
+model poisson_interarrival (k::Double) (theta::Double) { raw_rate, (len, poisson_seqs) } =
+  -- rate ~ gamma k theta
+  raw_rate ~ arbitrary
+  rate = abs raw_rate
+  len ~ arbitrary
+  -- len ~ delta 10
+  poisson_seqs ~ vec_iid len (poisson_seq rate)
+
+model poisson_seq_prior rate { len, deltas } =
+  len ~ delta 40
+  deltas ~ vec_iid len (exponential rate)
+
+model poisson_interarrival_prior (k::Double) (theta::Double) { rate, (len, poisson_seqs) } =
+  rate ~ gamma k theta
+  len ~ delta 10
+  poisson_seqs ~ vec_iid len (poisson_seq_prior rate)
+
+
+--
+-- Top-level Main Function
+--
+
+main =
+  -- (1, (_, _)) ~ poisson_interarrival_prior 1 1
+  -- using prior ()
+  (_, (_, _)) ~ poisson_interarrival 1 1
+  using pvie (viTuple2 viGamma viJSONInput)
