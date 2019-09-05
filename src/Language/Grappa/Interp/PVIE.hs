@@ -153,7 +153,7 @@ instance ADR.Reifies s ADR.Tape => FromDouble (ADR.Reverse s Double) where
   fromDouble = ADR.auto
 
 -- | All the typeclasses we want for types used in differentiable functions
-type DiffConstr a = (RealFloat a, Ord a, Show a, FromDouble a)
+type DiffConstr a = (RealFloat a, Ord a, Show a, FromDouble a, HasGamma a)
 
 -- | The type of functions that are differentiable using AD
 type DiffFun = forall r. DiffConstr r => Vector r -> r
@@ -550,6 +550,19 @@ categoricalVIFamExpr dim =
       if x < 0 || x >= n then 0 else
         log (ps V.! x))
 
+-- | Build a distribution family expression for the gamma distribution, where
+-- we use absolute value of @k@ and @theta@ to them to the non-negative reals
+gammaVIFamExpr :: VIDistFamExpr R
+gammaVIFamExpr =
+  simpleVIFamExpr "Gamma" 2 (\ps -> mwcGamma (abs (ps SV.! 0)) (abs (ps SV.! 1)))
+  (\ps ->
+    let k = abs (ps SV.! 0)
+        theta = abs (ps SV.! 1) in
+    k + log theta + Log.ln (logGamma k) + (1-k) * digamma k)
+  (\x ps ->
+    Log.ln $
+    gammaDensityUnchecked (abs (ps V.! 0)) (abs (ps V.! 1)) (fromDouble x))
+
 -- | Bind a fresh dimensionality variable in a distribution family expression
 bindVIDimFamExpr :: (VIDim -> VIDistFamExpr a) -> VIDistFamExpr a
 bindVIDimFamExpr f =
@@ -675,7 +688,7 @@ pvie d log_p = init_pvie where
     -- Allocate and initialize our mutable params
     mut_params <- SMV.new (evalVIDim (viDistDim d) asgn)
     -- FIXME HERE: have VIDistFams initialize their mut_params
-    SMV.set mut_params 0.001
+    SMV.set mut_params 1
     -- Generate the initial value to try to beat
     val <- optimize (neg_elbo_with_grad g d log_p asgn) mut_params
     params <- SV.unsafeFreeze mut_params
