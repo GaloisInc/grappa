@@ -8,6 +8,7 @@
 
 module Language.Grappa.GrappaInternals where
 
+import Data.List
 import Data.Typeable
 import Data.Functor.Const
 import Data.Proxy (Proxy(..))
@@ -143,6 +144,9 @@ instance GrappaType a => GrappaType (Dist a) where
   grappaTypeRepr = GrappaDistType grappaTypeRepr
 instance (GrappaType a, GrappaType b) => GrappaType (a -> b) where
   grappaTypeRepr = GrappaArrowType grappaTypeRepr grappaTypeRepr
+instance GrappaType a => GrappaType (Vector a) where
+  grappaTypeRepr =
+    GrappaBaseType $ GrappaTypeAppApply GrappaTypeAppBase grappaTypeRepr
 
 -- Instances for representing base types; remember to add more instances here
 -- when we want to support more Haskell types in Grappa!
@@ -704,6 +708,13 @@ instance GrappaShow Int where
 
 instance GrappaShow a => GrappaShow (Id a) where
   grappaShow (Id x) = grappaShow x
+
+instance GrappaShow (adt Id (ADT adt)) => GrappaShow (ADT adt) where
+  grappaShow (ADT x) = grappaShow x
+
+instance GrappaShow a => GrappaShow (Vector a) where
+  grappaShow xs =
+    "[|" ++ concat (intersperse ", " (map grappaShow $ V.toList xs)) ++ "|]"
 
 instance MapC GrappaShow (MapF f ts) => GrappaShow (TupleF ts f r) where
   grappaShow Tuple0 = "()"
