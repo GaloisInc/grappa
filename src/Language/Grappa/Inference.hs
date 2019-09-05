@@ -77,7 +77,7 @@ ppParam ip =
 
 grappaPrint :: GrappaShow t => t -> IO ()
 grappaPrint x =
-  dtrace ("grappaPrint: " ++ grappaShow x) $
+  -- dtrace ("grappaPrint: " ++ grappaShow x) $
   putStrLn (grappaShow x) >> hFlush stdout
 
 sampleDist :: ValidRepr repr => GExpr repr (Dist a) -> GVExpr repr a ->

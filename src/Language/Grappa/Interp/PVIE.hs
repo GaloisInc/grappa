@@ -558,7 +558,7 @@ gammaVIFamExpr =
   (\ps ->
     let k = abs (ps SV.! 0)
         theta = abs (ps SV.! 1) in
-    k + log theta + Log.ln (logGamma k) + (1-k) * digamma k)
+    k + log theta + logGamma k + (1-k) * digamma k)
   (\x ps ->
     Log.ln $
     gammaDensityUnchecked (abs (ps V.! 0)) (abs (ps V.! 1)) (fromDouble x))

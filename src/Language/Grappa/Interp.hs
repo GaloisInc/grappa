@@ -644,7 +644,7 @@ class ValidExprRepr repr => Interp__probToLogReal repr where
 
 -- | Compute the log-gamma function as a map from reals to probabilities
 gammaProb :: R -> Prob
-gammaProb = Prob . logGamma
+gammaProb = Prob . Log.Exp . logGamma
 
 class ValidExprRepr repr => Interp__gammaProb repr where
   interp__gammaProb :: GExpr repr (R -> Prob)
@@ -652,7 +652,7 @@ class ValidExprRepr repr => Interp__gammaProb repr where
 instance (Interp__gammaProb repr, Interp__probToLogReal repr) =>
          HasGamma (GExpr repr R) where
   logGamma =
-    Log.Exp . interp__'app interp__probToLogReal .
+    interp__'app interp__probToLogReal .
     interp__'app interp__gammaProb
 
 

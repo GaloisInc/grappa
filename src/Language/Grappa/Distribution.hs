@@ -4,6 +4,7 @@
 {-# LANGUAGE DataKinds, PolyKinds, ConstraintKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Language.Grappa.Distribution where
@@ -45,10 +46,27 @@ newtype RMatrix = RMatrix { unRMatrix :: M.Matrix Double }
 
 -- | Class for computing @ln (gamma x)@
 class HasGamma a where
-  logGamma :: a -> Log.Log a
+  logGamma :: a -> a
+  digamma :: a -> a
 
 instance HasGamma Double where
-  logGamma = Log.Exp . Gamma.logGamma
+  logGamma = Gamma.logGamma
+  digamma = Gamma.digamma
+
+-- | The 'trigamma' function = the derivative of 'digamma' (which itself is the
+-- derivative of 'logGamma'). This implementation was cribbed from
+-- <https://stackoverflow.com/questions/2978979/how-to-improve-performance-of-this-numerical-computation-in-haskell/2983578 this>
+-- Stack Overflow post
+trigamma :: Double -> Double
+trigamma x = go 0 (x + 5) $ computeP $ x + 6
+  where
+    go :: Int -> Double -> Double -> Double
+    go !i !z !p
+        | i >= 6    = p
+        | otherwise = go (i+1) (z-1) (1 / (z*z) + p)
+    invSq z = 1 / (z * z)
+    computeP z = (((((5/66*p-1/30)*p+1/42)*p-1/30)*p+1/6)*p+1)/z+0.5*p
+      where p = invSq z
 
 
 ----------------------------------------------------------------------
@@ -87,7 +105,10 @@ instance ADR.Reifies rs ADR.Tape => Log.Precise (ADR.Reverse rs Double) where
   expm1 x = ADR.unary Log.expm1 (ADR.Id ((ADR.primal x) * exp (ADR.primal x))) x
 
 instance ADR.Reifies s ADR.Tape => HasGamma (ADR.Reverse s Double) where
-  logGamma = error "FIXME HERE NOW: define logGamma for AD!"
+  logGamma x =
+    ADR.unary Gamma.logGamma (ADR.Id $ Gamma.digamma $ ADR.primal x) x
+  digamma x =
+    ADR.unary Gamma.logGamma (ADR.Id $ trigamma $ ADR.primal x) x
 
 
 ----------------------------------------------------------------------
@@ -619,8 +640,7 @@ betaDensityUnchecked :: (HasGamma a, Floating a) => a -> a -> a -> Log.Log a
 betaDensityUnchecked alpha beta x =
   Log.Exp $
   ((alpha - 1) * log x) + ((beta - 1) * log (1 - x)) -
-  (Log.ln (logGamma alpha) + Log.ln (logGamma alpha)
-   - Log.ln (logGamma (alpha + beta)))
+  (logGamma alpha + logGamma alpha - logGamma (alpha + beta))
 
 betaDensity :: (Ord a, HasGamma a, RealFloat a, Log.Precise a) =>
                a -> a -> a -> Log.Log a
@@ -645,8 +665,7 @@ relativeGammaDensity k theta x =
 -- parameter @k@ and scale parameter @theta@
 gammaDensityUnchecked :: (HasGamma a, Floating a) => a -> a -> a -> Log.Log a
 gammaDensityUnchecked k theta x =
-  Log.Exp (Log.ln (relativeGammaDensity k theta x)
-           - Log.ln (logGamma k) - k * log theta)
+  Log.Exp (Log.ln (relativeGammaDensity k theta x) - logGamma k - k * log theta)
 
 -- | Calculate the PDF of the gamma distribution, given shape parameter @k@ and
 -- scale parameter @theta@
@@ -665,7 +684,7 @@ type instance Support Dirichlet = [R]
 logMVBeta :: (HasGamma a, Floating a) => [a] -> Log.Log a
 logMVBeta alphas =
   -- Gamma (a_1) * ... * Gamma (a_n) / Gamma (a_1 + ... + a_n) in log space
-  Log.Exp $ sum (map (Log.ln . logGamma) alphas) - Log.ln (logGamma (sum alphas))
+  Log.Exp $ sum (map logGamma alphas) - logGamma (sum alphas)
 
 -- | Calculate the density of the Dirichlet distribution at any type that
 -- supports the gamma function

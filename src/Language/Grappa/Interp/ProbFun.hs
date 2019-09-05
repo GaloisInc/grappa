@@ -15,6 +15,7 @@ module Language.Grappa.Interp.ProbFun where
 
 import Data.Vector (Vector)
 import qualified Data.Vector as V
+import qualified Numeric.Log as Log
 import Data.Functor.Compose
 import Data.Aeson
 
@@ -300,7 +301,7 @@ instance Interp__probToLogReal ProbFunRepr where
   interp__probToLogReal = GExpr probToLogR
 
 instance Interp__gammaProb ProbFunRepr where
-  interp__gammaProb = GExpr (Prob . logGamma)
+  interp__gammaProb = GExpr (Prob . Log.Exp . logGamma)
 
 
 ----------------------------------------------------------------------
