@@ -597,6 +597,21 @@ instance PDFDist Categorical where
     if n >= length ws then 0 else ws!!n / total_w
 
 
+data Exponential = Exponential R deriving Show
+type instance Support Exponential = R
+
+exponentialDensityUnchecked :: (RealFloat a, Log.Precise a) =>
+                               a -> a -> Log.Log a
+exponentialDensityUnchecked rate x = Log.Exp $ log rate - rate * x
+
+exponentialDensity :: (Ord a, RealFloat a, Log.Precise a) => a -> a -> Log.Log a
+exponentialDensity rate x =
+  if x > 0 then exponentialDensityUnchecked rate x else 0
+
+instance PDFDist Exponential where
+  distDensity (Exponential rate) = Prob . exponentialDensity rate
+
+
 data Beta = Beta R R deriving Show
 type instance Support Beta = R
 
