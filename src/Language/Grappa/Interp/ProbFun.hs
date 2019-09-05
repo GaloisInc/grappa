@@ -319,11 +319,17 @@ instance Interp__gerror ProbFunRepr a where
 -- Interpreting Distributions
 ----------------------------------------------------------------------
 
+instance Interp__delta ProbFunRepr Int where
+  interp__delta = GExpr $ \i x -> if x == i then 1 else 0
+
 instance Interp__normal ProbFunRepr where
   interp__normal = GExpr normalDensity
 
 instance Interp__uniform ProbFunRepr where
   interp__uniform = GExpr uniformDensity
+
+instance Interp__exponential ProbFunRepr where
+  interp__exponential = GExpr $ \rate x -> Prob $ exponentialDensity rate x
 
 instance Interp__gamma ProbFunRepr where
   interp__gamma = GExpr $ \k theta x -> Prob $ gammaDensity k theta x
@@ -370,7 +376,7 @@ instance Interp__vec_tail ProbFunRepr a where
 instance Interp__vec_length ProbFunRepr a where
   interp__vec_length = GExpr V.length
 
-instance Interp__vec_iid ProbFunRepr where
+instance Interp__vec_iid ProbFunRepr a where
   interp__vec_iid = GExpr $ \n d xs ->
     if V.length xs == n then
       product $ V.map d xs
