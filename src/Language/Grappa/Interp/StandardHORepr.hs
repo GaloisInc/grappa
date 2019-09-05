@@ -422,6 +422,9 @@ instance Interp__probToLogReal (StandardHORepr m r i) where
 instance HasGamma r => Interp__gammaProb (StandardHORepr m r i) where
   interp__gammaProb = GExpr (Log.Exp . logGamma)
 
+instance HasGamma r => Interp__digamma (StandardHORepr m r i) where
+  interp__digamma = GExpr digamma
+
 
 ----------------------------------------------------------------------
 -- Misc operations

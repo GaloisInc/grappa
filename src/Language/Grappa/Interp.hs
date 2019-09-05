@@ -649,11 +649,16 @@ gammaProb = Prob . Log.Exp . logGamma
 class ValidExprRepr repr => Interp__gammaProb repr where
   interp__gammaProb :: GExpr repr (R -> Prob)
 
-instance (Interp__gammaProb repr, Interp__probToLogReal repr) =>
+class ValidExprRepr repr => Interp__digamma repr where
+  interp__digamma :: GExpr repr (R -> R)
+
+instance (Interp__gammaProb repr, Interp__probToLogReal repr,
+          Interp__digamma repr) =>
          HasGamma (GExpr repr R) where
   logGamma =
     interp__'app interp__probToLogReal .
     interp__'app interp__gammaProb
+  digamma = interp__'app interp__digamma
 
 
 ----------------------------------------------------------------------
@@ -815,6 +820,9 @@ class ValidExprRepr repr => Interp__viNormal repr where
 
 class ValidExprRepr repr => Interp__viUniform repr where
   interp__viUniform :: GExpr repr (VIDist Double)
+
+class ValidExprRepr repr => Interp__viGamma repr where
+  interp__viGamma :: GExpr repr (VIDist Double)
 
 class ValidExprRepr repr => Interp__viDelta repr a where
   interp__viDelta :: GExpr repr (a -> VIDist a)

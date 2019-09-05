@@ -303,6 +303,9 @@ instance Interp__probToLogReal ProbFunRepr where
 instance Interp__gammaProb ProbFunRepr where
   interp__gammaProb = GExpr (Prob . Log.Exp . logGamma)
 
+instance Interp__digamma ProbFunRepr where
+  interp__digamma = GExpr digamma
+
 
 ----------------------------------------------------------------------
 -- Misc operations
@@ -413,6 +416,9 @@ instance Interp__viNormal ProbFunRepr where
 
 instance Interp__viUniform ProbFunRepr where
   interp__viUniform = GExpr uniformVIFamExpr
+
+instance Interp__viGamma ProbFunRepr where
+  interp__viGamma = GExpr gammaVIFamExpr
 
 instance Interp__viCategorical ProbFunRepr where
   interp__viCategorical = GExpr categoricalVIFamExpr

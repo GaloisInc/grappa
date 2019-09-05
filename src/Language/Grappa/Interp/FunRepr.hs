@@ -258,6 +258,9 @@ instance Interp__probToLogReal repr =>
 instance Interp__gammaProb repr => Interp__gammaProb (FunRepr r repr) where
   interp__gammaProb = abstractFunRepr interp__gammaProb
 
+instance Interp__digamma repr => Interp__digamma (FunRepr r repr) where
+  interp__digamma = abstractFunRepr interp__digamma
+
 
 --
 -- Misc operations

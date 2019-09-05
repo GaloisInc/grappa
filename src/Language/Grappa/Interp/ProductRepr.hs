@@ -342,6 +342,10 @@ instance (Interp__gammaProb repr1, Interp__gammaProb repr2) =>
          Interp__gammaProb (ProductRepr repr1 repr2) where
   interp__gammaProb = mkProduct interp__gammaProb interp__gammaProb
 
+instance (Interp__digamma repr1, Interp__digamma repr2) =>
+         Interp__digamma (ProductRepr repr1 repr2) where
+  interp__digamma = mkProduct interp__digamma interp__digamma
+
 
 --
 -- Misc operations

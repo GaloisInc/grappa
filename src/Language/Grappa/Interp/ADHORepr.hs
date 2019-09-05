@@ -633,6 +633,9 @@ instance Interp__probToLogReal (ADHORepr m f) where
 instance Interp__gammaProb (ADHORepr m f) where
   interp__gammaProb = GExpr $ ADExpr $ \_ -> interp__gammaProb
 
+instance Interp__digamma (ADHORepr m f) where
+  interp__digamma = GExpr $ ADExpr $ \_ -> interp__digamma
+
 {-
 instance (Show a, Show (ADExpr m f a), i ~ Int) =>
          Interp__gtrace (ADHORepr m f) a b where

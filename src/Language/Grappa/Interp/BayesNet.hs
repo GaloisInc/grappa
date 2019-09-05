@@ -1119,6 +1119,9 @@ instance Interp__probToLogReal BNExprRepr where
 instance Interp__gammaProb BNExprRepr where
   interp__gammaProb = mkBnFunExpr1 gammaProb interp__gammaProb
 
+instance Interp__digamma BNExprRepr where
+  interp__digamma = mkBnFunExpr1 digamma interp__digamma
+
 
 --
 -- Misc expressions

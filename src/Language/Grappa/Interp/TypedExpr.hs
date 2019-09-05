@@ -22,6 +22,7 @@ import Data.Proxy
 import Data.Functor.Const
 import GHC.Generics
 
+import qualified Numeric.SpecFunctions as Gamma
 import qualified Language.Haskell.TH as TH
 
 import Language.Grappa.Interp
@@ -361,6 +362,9 @@ instance Interp__probToLogReal TypedExprRepr where
 
 instance Interp__gammaProb TypedExprRepr where
   interp__gammaProb = typedVar 'gammaProb
+
+instance Interp__digamma TypedExprRepr where
+  interp__digamma = typedVar 'Gamma.digamma
 
 
 --

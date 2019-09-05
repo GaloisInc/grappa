@@ -230,6 +230,9 @@ instance (Monoid w, Eq w) => Interp__probToLogReal (MonoidRepr w) where
 instance (Monoid w, Eq w) => Interp__gammaProb (MonoidRepr w) where
   interp__gammaProb = interp__'bottom
 
+instance (Monoid w, Eq w) => Interp__digamma (MonoidRepr w) where
+  interp__digamma = interp__'bottom
+
 
 --
 -- Misc operations
