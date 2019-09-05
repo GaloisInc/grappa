@@ -15,6 +15,8 @@
 
 module Language.Grappa.Interp.StandardHORepr where
 
+import Data.Vector (Vector)
+import qualified Data.Vector as V
 import Control.Monad
 
 import Language.Grappa.Distribution
@@ -46,6 +48,7 @@ type family StandardHOReprF m r i a :: * where
     (DistVar (StandardHORepr m r i) a -> m (StandardHOReprF m r i a))
   StandardHOReprF m r i (ADT adt) =
     adt (GExpr (StandardHORepr m r i)) (ADT adt)
+  StandardHOReprF m r i (Vector a) = Vector (StandardHOReprF m r i a)
   StandardHOReprF m r i Bool    = Bool
   StandardHOReprF m r i Int     = i
   StandardHOReprF m r i Prob    = Log.Log r
@@ -114,6 +117,14 @@ matchHOReprListDistVar dv =
         (hdv:l, flag))
   ([], True)
 
+matchHOReprVectorDistVar ::
+  DistVar (StandardHORepr m r i) (Vector a) ->
+  (Vector (DistVar (StandardHORepr m r i) a) -> ret) -> ret -> ret
+matchHOReprVectorDistVar VParam _ ret = ret
+matchHOReprVectorDistVar (VData (GData a)) k _ = k $ V.map (VData . GData) a
+matchHOReprVectorDistVar (VData GNoData) _ ret = ret
+matchHOReprVectorDistVar (VExpr (GExpr dvs)) k _ = k $ V.map (VExpr . GExpr) dvs
+
 instance Monad m => ValidRepr (StandardHORepr m r i) where
   type GVExprRepr (StandardHORepr m r i) a =
     DistVar (StandardHORepr m r i) a
@@ -179,6 +190,30 @@ instance Num i => EmbedRepr (StandardHORepr m r i) Int where
 
 instance EmbedRepr (StandardHORepr m r i) Bool where
   embedRepr = GExpr
+
+instance MapC (EmbedRepr (StandardHORepr m r i)) ts =>
+         EmbedRepr (StandardHORepr m r i) (ADT (TupleF ts)) where
+  embedRepr = GExpr . helper . unADT where
+    helper :: MapC (EmbedRepr (StandardHORepr m r i)) ts' =>
+              TupleF ts' Id any -> TupleF ts' (GExpr (StandardHORepr m r i)) any
+    helper (Tuple0) = Tuple0
+    helper (Tuple1 (Id a)) = Tuple1 (embedRepr a)
+    helper (Tuple2 (Id a) (Id b)) =
+      Tuple2 (embedRepr a) (embedRepr b)
+    helper (Tuple3 (Id a) (Id b) (Id c)) =
+      Tuple3 (embedRepr a) (embedRepr b) (embedRepr c)
+    helper (Tuple4 (Id a) (Id b) (Id c) (Id d)) =
+      Tuple4 (embedRepr a) (embedRepr b) (embedRepr c) (embedRepr d)
+    helper (TupleN (Id a) (Id b) (Id c) (Id d) (Id e) tup) =
+      TupleN (embedRepr a) (embedRepr b) (embedRepr c) (embedRepr d)
+      (embedRepr e) (helper tup)
+
+instance EmbedRepr (StandardHORepr m Double i) a =>
+         EmbedRepr (StandardHORepr m Double i) (Vector a) where
+  embedRepr xs = GExpr $ V.map (unGExpr . helper) xs where
+    helper :: EmbedRepr (StandardHORepr m Double i) a => a ->
+              GExpr (StandardHORepr m Double i) a
+    helper = embedRepr
 
 
 ----------------------------------------------------------------------
@@ -461,7 +496,68 @@ instance (Monad m, Num i, Eq i, Show i,
 
 
 --
+-- * Vector Operations
+--
+
+instance (Monad m, i ~ Int, EmbedRepr (StandardHORepr m r Int) a) =>
+         Interp__vec_iid (StandardHORepr m r i) a where
+  interp__vec_iid = GExpr $ \len d dv ->
+    matchHOReprVectorDistVar dv
+    (\dvs ->
+      if V.length dvs == len then V.mapM d dvs else
+        error "vec_iid: incorrect vector length on input")
+    (V.replicateM len (d VParam))
+
+{-
+-- | Build a distribution on 'Vector's from one on lists
+instance (Monad m, EmbedRepr (StandardHORepr m r Int) a) =>
+         Interp__vec_dist (StandardHORepr m r Int) a where
+  interp__vec_dist = GExpr $ \d dv ->
+    matchHOReprVectorDistVar dv
+    (\dvs ->
+      V.fromList <$> toHaskellListF unGExpr <$> unGExpr <$>
+      d _)
+    _
+-}
+
+instance Monad m => Interp__vec_nil_dist (StandardHORepr m r i) a where
+  interp__vec_nil_dist = GExpr $ \dv ->
+    matchHOReprVectorDistVar dv
+    (\dvs ->
+      if V.length dvs == 0 then return V.empty else
+        error "vec_nil_dist: non-empty vector!")
+    (return V.empty)
+
+instance Monad m => Interp__vec_cons_dist (StandardHORepr m r i) a where
+  interp__vec_cons_dist = GExpr $ \d dv ->
+    do (Tuple2 (GExpr hd) (GExpr tl)) <-
+         case dv of
+           VParam -> d VParam
+           VData (GData xs) ->
+             if V.length xs == 0 then
+               error "vec_cons_dist: empty vector!"
+             else
+               d $ VData $ GData $ ADT $ Tuple2 (Id $ V.head xs) (Id $ V.tail xs)
+           VData GNoData -> d (VData GNoData)
+           VExpr (GExpr es) ->
+             if V.length es == 0 then
+               error "vec_cons_dist: empty vector!"
+             else
+               d $ VExpr $ GExpr $ Tuple2 (GExpr $ V.head es) (GExpr $ V.tail es)
+       return (V.cons hd tl)
+
+instance Interp__vec_head (StandardHORepr m r i) a where
+  interp__vec_head = GExpr V.head
+
+instance Interp__vec_tail (StandardHORepr m r i) a where
+  interp__vec_tail = GExpr V.tail
+
+instance i ~ Int => Interp__vec_length (StandardHORepr m r i) a where
+  interp__vec_length = GExpr V.length
+
+
+--
 -- * Matrix Operations
 --
 
--- FIXME HERE NOW: matrix operations!
+-- FIXME: matrix operations!
