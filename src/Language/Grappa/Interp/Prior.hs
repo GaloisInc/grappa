@@ -76,7 +76,7 @@ instance Interp__exponential PriorRepr where
 instance Interp__gamma PriorRepr where
   interp__gamma = GExpr $ \k theta dv ->
     matchHOReprAtomicDistVar dv (return . unGExpr)
-    (PriorM $ random $ MWC.gamma k theta)
+    (PriorM $ mwcGamma k theta)
 
 instance Interp__dirichlet PriorRepr where
   interp__dirichlet = GExpr $ \alphas_gexpr dv ->
