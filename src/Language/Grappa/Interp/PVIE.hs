@@ -12,6 +12,7 @@
 
 module Language.Grappa.Interp.PVIE where
 
+import Data.List
 import GHC.Generics hiding (R)
 import Data.Functor.Const
 import Data.Functor.Compose
@@ -746,7 +747,7 @@ optimize opts f mut_params =
      SV.copy mut_params opt_params
      return $ eval_f opt_params
 
--- FIXME HERE: make VIDistFams know how to initialize their params
+-- FIXME HERE: make pvie_epsilon and num_samples into command-line options
 
 -- | The amount that PVIE has to improve in an interation to seem "better"
 pvie_epsilon :: Double
@@ -756,34 +757,55 @@ pvie_epsilon = 1.0e-6
 num_samples :: Int
 num_samples = 1000
 
+-- | The negative infinity value
+negInfinity :: Double
+negInfinity = log 0
+
+-- | Test if a 'Double' is negative infinite
+isNegInfinity :: Double -> Bool
+isNegInfinity x = isInfinite x && x < 0
+
 -- | Compute the negative Evidence Lower BOund (or ELBO) and its gradient
-neg_elbo_with_grad :: GrappaShow a => MWC.GenIO ->
+neg_elbo_with_grad :: GrappaShow a => PVIEOpts -> MWC.GenIO ->
                       VIDistFam a -> (a -> Double) -> VIDimAsgn ->
                       (Params -> MutParams -> IO Double)
-neg_elbo_with_grad g d log_p asgn params grad =
-  do ret <- elbo_with_grad g d log_p asgn params grad
+neg_elbo_with_grad opts g d log_p asgn params grad =
+  do ret <- elbo_with_grad opts g d log_p asgn params grad
      forM_ [0 .. (SMV.length grad)-1] (SMV.modify grad negate)
      return (-ret)
 
 -- | Compute the Evidence Lower BOund (or ELBO) and its gradient
-elbo_with_grad :: GrappaShow a => MWC.GenIO ->
+elbo_with_grad :: GrappaShow a => PVIEOpts -> MWC.GenIO ->
                   VIDistFam a -> (a -> Double) -> VIDimAsgn ->
                   (Params -> MutParams -> IO Double)
-elbo_with_grad g d log_p asgn params grad =
-  -- trace ("neg_elbo_with_grad: params = " ++ show params) $
-  do samples <-
-       replicateM num_samples (runSamplingM (viDistSample d) g asgn params)
-     -- traceM ("samples: " ++ show (map grappaShow samples))
-     let n = fromIntegral num_samples
-     entr <- runParamsGradM (viDistEntropy d) asgn params grad
-     forM_ samples $ \samp ->
-       runParamsGradM (viDistScaledGradPDF d (log_p samp / n) samp)
-       asgn params grad
-     -- grad_const <- SV.unsafeFreeze grad
-     -- traceM ("grad = " ++ show grad_const)
-     let ret = entr + (1/n) * sum (map log_p samples)
-     -- traceM ("surprisal = " ++ show ret)
-     return ret
+elbo_with_grad opts g d log_p asgn params grad =
+  (replicateM num_samples $
+   do s <- runSamplingM (viDistSample d) g asgn params
+      return (s, log_p s)) >>= \samples_log_ps ->
+  case find (isNegInfinity . snd) samples_log_ps of
+    Just (bad_samp, _) ->
+      -- If any of our samples have 0 probability in our model (i.e., from
+      -- log_p), the elbo is -infinity, and the gradient is undefined. However,
+      -- knowing our optimization algorithm, we cheat, and tell it that the
+      -- gradient is just the sum of the negatives of the gradients of d at
+      -- those 0 probability samples. That way, our optimization algorithm will
+      -- keep trying to reduce the probabilities of generating bad samples until
+      -- it finally succeeds. Note that we still return -infinity as the value.
+      do debugM opts 2 ("Zero-probability sample: " ++ grappaShow bad_samp)
+         forM_ samples_log_ps $ \(samp, p) ->
+           when (isNegInfinity p) $
+           runParamsGradM (viDistScaledGradPDF d (-1e9) samp) asgn params grad
+         return negInfinity
+    _ ->
+      do let n = fromIntegral num_samples
+         entr <- runParamsGradM (viDistEntropy d) asgn params grad
+         forM_ samples_log_ps $ \(samp, p) ->
+           runParamsGradM (viDistScaledGradPDF d (p / n) samp) asgn params grad
+         -- grad_const <- SV.unsafeFreeze grad
+         -- traceM ("grad = " ++ show grad_const)
+         let ret = entr + (1/n) * sum (map snd samples_log_ps)
+         -- traceM ("surprisal = " ++ show ret)
+         return ret
 
 -- | The main entrypoint for the PVIE engine
 pvie_main :: GrappaShow a => VIDistFamExpr a -> (a -> Double) -> IO ()
@@ -809,7 +831,7 @@ pvie_eval opts d log_p =
   do PVIEModel asgn params <- readJSONfile $ pvieModelFile opts
      g <- MWC.createSystemRandom
      grad <- SMV.new (evalVIDim (viDistDim d) asgn)
-     val <- neg_elbo_with_grad g d log_p asgn params grad
+     val <- neg_elbo_with_grad opts g d log_p asgn params grad
      return val
 
 -- | The PVIE training mode
@@ -824,7 +846,7 @@ pvie_train opts d log_p = init_pvie where
     PVIEModel asgn params <- readPVIEModel d (pvieModelFile opts)
     mut_params <- SV.unsafeThaw params
     -- Generate the initial value to try to beat
-    val <- optimize opts (neg_elbo_with_grad g d log_p asgn) mut_params
+    val <- optimize opts (neg_elbo_with_grad opts g d log_p asgn) mut_params
     params' <- SV.unsafeFreeze mut_params
     -- If there are no dimensionality variables in our distribution family, then
     -- there is nothing to increment, so we are done
@@ -875,7 +897,7 @@ pvie_train opts d log_p = init_pvie where
     -- Copy our current best parameters into our scratch area
     runGrowM (viDistGrowParams d) asgn new_asgn last_params scratch
     -- Optimize those parameters
-    new_val <- optimize opts (neg_elbo_with_grad g d log_p asgn) scratch
+    new_val <- optimize opts (neg_elbo_with_grad opts g d log_p asgn) scratch
     -- Test how much we improved
     if last_val - new_val >= pvie_epsilon then
       -- If we did improve, swap last_params and scratch, then iterate
