@@ -791,7 +791,7 @@ elbo_with_grad opts g d log_p asgn params grad =
       -- those 0 probability samples. That way, our optimization algorithm will
       -- keep trying to reduce the probabilities of generating bad samples until
       -- it finally succeeds. Note that we still return -infinity as the value.
-      do debugM opts 2 ("Zero-probability sample: " ++ grappaShow bad_samp)
+      do debugM opts 3 ("Zero-probability sample: " ++ grappaShow bad_samp)
          forM_ samples_log_ps $ \(samp, p) ->
            when (isNegInfinity p) $
            runParamsGradM (viDistScaledGradPDF d (-1e9) samp) asgn params grad
