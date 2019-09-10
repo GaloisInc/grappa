@@ -323,11 +323,7 @@ runPVIE :: GrappaShow (ProbFunReprF a) =>
            GExpr ProbFunRepr (VIDist a) -> Source a ->
            GExpr ProbFunRepr (Dist a) -> IO ()
 runPVIE (unGExpr -> dist_expr) _ (unGExpr -> log_p) =
-  do dist_fam <- evalVIDistFamExpr dist_expr
-     (asgn, params, val) <- pvie dist_fam (probToLogR . log_p)
-     pp <- applyPPFun (viDistPP dist_fam) asgn params
-     putStrLn $ show pp
-     putStrLn ("Surprisal score: " ++ show val)
+  pvie_main dist_expr (probToLogR . log_p)
 
 pvieMethod :: InferenceMethod
 pvieMethod = InferenceMethod

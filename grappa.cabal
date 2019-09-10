@@ -143,6 +143,7 @@ library
                      , language-c
                      , pretty
                      , lens
+                     , optparse-applicative
 
   -- -- This flag depends on the @variational-inference@ flag, which is
   -- -- handled automatically below.

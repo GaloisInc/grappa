@@ -8,9 +8,11 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Language.Grappa.Interp.PVIE where
 
+import GHC.Generics hiding (R)
 import Data.Functor.Const
 import Data.Functor.Compose
 -- import Data.Functor.Product
@@ -28,6 +30,7 @@ import qualified Data.ByteString.Lazy as BS
 import Data.Aeson
 import System.IO
 import System.IO.Unsafe
+import System.Directory (doesFileExist)
 
 import Data.Vector (Vector)
 import qualified Data.Vector as V
@@ -52,7 +55,30 @@ import qualified System.Random.MWC.Distributions as MWC
 import qualified Text.PrettyPrint.ANSI.Leijen as PP
 import Text.PrettyPrint.ANSI.Leijen ((<+>), (<>))
 
+import Options.Applicative
+import Data.Semigroup ((<>))
+
 import Debug.Trace
+
+
+-- | Read JSON file @filename@ and parse it to an @a@, where @filename@ can be
+-- @"-"@ to denote 'stdin'
+readJSONfile :: FromJSON a => String -> IO a
+readJSONfile f =
+  withFileContents f $ \contents ->
+  case eitherDecode' contents of
+    Left err -> error ("Could not parse JSON file " ++ f ++ ": " ++ err)
+    Right a -> return a
+  where
+    withFileContents :: String -> (BS.ByteString -> IO a) -> IO a
+    withFileContents "-" k = BS.hGetContents stdin >>= k
+    withFileContents filename k =
+      withFile filename ReadMode $ \h -> BS.hGetContents h >>= k
+
+-- | Write JSON file @filename@, which can be @"-"@ to indicate 'stdout'
+writeJSONfile :: ToJSON a => String -> a -> IO ()
+writeJSONfile "-" a = BS.putStr $ encode a
+writeJSONfile filename a = encodeFile filename a
 
 
 ----------------------------------------------------------------------
@@ -79,7 +105,12 @@ maxVar :: VIDimVar -> VIDimVar -> VIDimVar
 maxVar (VIDimVar v1) (VIDimVar v2) = VIDimVar $ max v1 v2
 
 -- | An assignment to dimensionality variables, which should be non-negative
-newtype VIDimAsgn = VIDimAsgn [Int]
+newtype VIDimAsgn = VIDimAsgn [Int] deriving Generic
+
+instance FromJSON VIDimAsgn where
+
+instance ToJSON VIDimAsgn where
+  toEncoding = genericToEncoding defaultOptions
 
 -- | Create an assignment where all variables below the given one are set to 0
 zeroAsgn :: VIDimVar -> VIDimAsgn
@@ -489,13 +520,15 @@ iidVIFam len d =
 ----------------------------------------------------------------------
 
 -- | An "expression" for building up a family of distributions, which keeps
--- track of how many dimensionality variables we have used so far
+-- track of how many dimensionality variables we have used so far and also a
+-- list of the data file names to be used by 'readJSONVIDistFamExpr'
 newtype VIDistFamExpr a =
-  VIDistFamExpr { runVIDistFamExpr :: StateT VIDimVar IO (VIDistFam a) }
+  VIDistFamExpr { runVIDistFamExpr ::
+                    StateT (VIDimVar, [String]) IO (VIDistFam a) }
 
 -- | Evaluate a distribution family expression into a distribution family
-evalVIDistFamExpr :: VIDistFamExpr a -> IO (VIDistFam a)
-evalVIDistFamExpr (VIDistFamExpr m) = evalStateT m (VIDimVar 0)
+evalVIDistFamExpr :: [String] -> VIDistFamExpr a -> IO (VIDistFam a)
+evalVIDistFamExpr files (VIDistFamExpr m) = evalStateT m (VIDimVar 0, files)
 
 -- | Build a distribution family expression for a "simple" distribution, meaning
 -- it is not a composite of multiple distributions on sub-components.  Such a
@@ -567,8 +600,8 @@ gammaVIFamExpr =
 bindVIDimFamExpr :: (VIDim -> VIDistFamExpr a) -> VIDistFamExpr a
 bindVIDimFamExpr f =
   VIDistFamExpr $ do
-  v <- get
-  put $ nextVar v
+  (v,files) <- get
+  put $ (nextVar v, files)
   runVIDistFamExpr $ f (varVIDim v)
 
 -- | Build a distribution family expression for a tuple from a tuple of
@@ -597,39 +630,116 @@ iidVIFamExpr len d_expr =
 readJSONVIDistFamExpr :: (Eq a, FromJSON a) => VIDistFamExpr a
 readJSONVIDistFamExpr =
   VIDistFamExpr $
-  do contents <- liftIO $ BS.hGetContents stdin
-     case eitherDecode' contents of
-       Left err -> error ("Could not parse JSON input: " ++ err)
-       Right a ->
-         runVIDistFamExpr $
-         simpleVIFamExpr ("JSONData")
-         0 (\_ -> return a) (\_ -> 0)
-         (\x _ -> if x == a then 0 else log 0)
+  do (v,files) <- get
+     let (file, files') =
+           if length files == 0 then
+             error "readJSONVIDistFamExpr: not enough data files specified"
+           else (head files, tail files)
+     put (v, files')
+     a <- liftIO $ readJSONfile file
+     return $
+       simpleVIFam ("JSONData")
+       0 (\_ -> return a) (\_ -> 0)
+       (\x _ -> if x == a then 0 else log 0)
 
 
 ----------------------------------------------------------------------
 -- * Variational Inference, Yay!
 ----------------------------------------------------------------------
 
+-- | A PVIE model is a dimensionaltiy variable assignment + model parameters
+data PVIEModel =
+  PVIEModel { pvieModelAsgn :: VIDimAsgn,
+              pvieModelParams :: Params }
+  deriving Generic
+
+instance FromJSON PVIEModel where
+
+instance ToJSON PVIEModel where
+  toEncoding = genericToEncoding defaultOptions
+
+readPVIEModel :: VIDistFam a -> String -> IO PVIEModel
+readPVIEModel d filename =
+  doesFileExist filename >>= \ex ->
+  if ex then
+    -- If filename exists, then read it
+    readJSONfile filename
+  else
+    -- Otherwise, start with 0 for all dimensionality variables, and
+    -- initialize all params to 1
+    --
+    -- FIXME HERE: have VIDistFams initialize their mut_params
+    let asgn = zeroAsgn $ viDimFirstUnusedVar $ viDistDim d
+        params = SV.replicate (evalVIDim (viDistDim d) asgn) 1 in
+    return $ PVIEModel asgn params
+
+
+-- | The PVIE modes: training and evaluation
+data PVIEMode = PVIETrainMode | PVIEEvalMode
+
+-- | The PVIE command-line options
+data PVIEOpts =
+  PVIEOpts {
+  pvieModelFile :: String,
+  pvieDataFiles :: [String],
+  pvieMode :: PVIEMode,
+  pvieVerbosity :: Int
+  }
+
+-- | Parser for PVIE command-line options
+pvieOptsParser :: Parser PVIEOpts
+pvieOptsParser =
+  PVIEOpts
+  <$> (strOption (long "model"
+                  <> short 'm'
+                  <> metavar "MODEL"
+                  <> help "Model file"
+                  <> value "-"
+                  <> showDefault))
+  <*> many (strOption (long "data"
+                       <> short 'd'
+                       <> metavar "DATAFILE"
+                       <> help "Data file"))
+  <*> (flag' PVIETrainMode (long "train" <> short 't'
+                            <> help "Specifies training mode")
+       <|>
+       flag' PVIEEvalMode (long "eval" <> short 'e'
+                            <> help "Specifies evaluation mode"))
+  <*> (option auto (long "verbosity" <> short 'v'
+                    <> help "Verbosity level for debugging"
+                    <> showDefault <> value 0 <> metavar "VERBOSITY"))
+
+-- | Parse the command-line options
+parsePVIEOpts :: IO PVIEOpts
+parsePVIEOpts = execParser (info (pvieOptsParser <**> helper)
+                            (fullDesc <>
+                             progDesc "FIXME: description of PVIE"))
+
+-- | Print debugging info if the verbosity level is @>= level@
+debugM :: PVIEOpts -> Int -> String -> IO ()
+debugM opts level s | level >= pvieVerbosity opts = traceM s
+debugM _ _ _ = return ()
+
 -- | Find the parameters that /minimize/ the given differentiable function
-optimize :: (Params -> MutParams -> IO Double) -> MutParams -> IO Double
-optimize f mut_params =
+optimize :: PVIEOpts -> (Params -> MutParams -> IO Double) ->
+            MutParams -> IO Double
+optimize opts f mut_params =
   do let len = SMV.length mut_params
      params <- SV.freeze mut_params
      let eval_f ps =
-           trace ("neg_elbo: params = " ++ show ps) $
            unsafePerformIO $
-           do grad <- SMV.replicate len 0
+           do debugM opts 2 ("neg_elbo: params = " ++ show ps)
+              grad <- SMV.replicate len 0
               ret <- f ps grad
-              traceM ("surprisal = " ++ show ret)
+              debugM opts 2 ("surprisal = " ++ show ret)
               return ret
      let grad_f ps =
-           trace ("neg_elbo_grad: params = " ++ show ps) $
            unsafePerformIO $
-           do grad <- SMV.replicate len 0
+           do debugM opts 2 ("neg_elbo_grad: params = " ++ show ps)
+              grad <- SMV.replicate len 0
               _ <- f ps grad
               ret <- SV.unsafeFreeze grad
-              traceM ("grad = " ++ show ret)
+              debugM opts 2 ("grad = " ++ show ret)
               return ret
      let (opt_params,_) =
            minimizeVD VectorBFGS2 0.0001 1000 1 0.1 eval_f grad_f params
@@ -675,38 +785,62 @@ elbo_with_grad g d log_p asgn params grad =
      -- traceM ("surprisal = " ++ show ret)
      return ret
 
-pvie :: GrappaShow a => VIDistFam a -> (a -> Double) ->
-        IO (VIDimAsgn, Params, Double)
-pvie d log_p = init_pvie where
+-- | The main entrypoint for the PVIE engine
+pvie_main :: GrappaShow a => VIDistFamExpr a -> (a -> Double) -> IO ()
+pvie_main dist_expr log_p =
+  do opts <- parsePVIEOpts
+     dist_fam <- evalVIDistFamExpr (pvieDataFiles opts) dist_expr
+     case pvieMode opts of
+       PVIETrainMode ->
+         do (model@(PVIEModel asgn params), val) <-
+              pvie_train opts dist_fam log_p
+            pp <- applyPPFun (viDistPP dist_fam) asgn params
+            debugM opts 1 $ show pp
+            debugM opts 1 ("Surprisal score: " ++ show val)
+            writeJSONfile (pvieModelFile opts) model
+       PVIEEvalMode ->
+         do val <- pvie_eval opts dist_fam log_p
+            putStrLn ("Surprisal score: " ++ show val)
+
+-- | The PVIE eval mode
+pvie_eval :: GrappaShow a => PVIEOpts -> VIDistFam a -> (a -> Double) ->
+             IO Double
+pvie_eval opts d log_p =
+  do PVIEModel asgn params <- readJSONfile $ pvieModelFile opts
+     g <- MWC.createSystemRandom
+     grad <- SMV.new (evalVIDim (viDistDim d) asgn)
+     val <- neg_elbo_with_grad g d log_p asgn params grad
+     return val
+
+-- | The PVIE training mode
+pvie_train :: GrappaShow a => PVIEOpts -> VIDistFam a -> (a -> Double) ->
+              IO (PVIEModel, Double)
+pvie_train opts d log_p = init_pvie where
 
   -- Initialize PVIE and start it running
-  init_pvie :: IO (VIDimAsgn, Params, Double)
+  init_pvie :: IO (PVIEModel, Double)
   init_pvie = do
     g <- MWC.createSystemRandom
-    -- Start with 0 for all dimensionality variables
-    let asgn = zeroAsgn $ viDimFirstUnusedVar $ viDistDim d
-    -- Allocate and initialize our mutable params
-    mut_params <- SMV.new (evalVIDim (viDistDim d) asgn)
-    -- FIXME HERE: have VIDistFams initialize their mut_params
-    SMV.set mut_params 1
+    PVIEModel asgn params <- readPVIEModel d (pvieModelFile opts)
+    mut_params <- SV.unsafeThaw params
     -- Generate the initial value to try to beat
-    val <- optimize (neg_elbo_with_grad g d log_p asgn) mut_params
-    params <- SV.unsafeFreeze mut_params
+    val <- optimize opts (neg_elbo_with_grad g d log_p asgn) mut_params
+    params' <- SV.unsafeFreeze mut_params
     -- If there are no dimensionality variables in our distribution family, then
     -- there is nothing to increment, so we are done
     if viDimFirstUnusedVar (viDistDim d) == zeroVar then
-      outer g asgn params val False
+      outer g asgn params' val False
       else
       -- Perform the first iteration of optimizing the dimensionality variables
-      outer g asgn params val True
+      outer g asgn params' val True
 
   -- The main outer loop
   outer :: MWC.GenIO -> VIDimAsgn -> Params -> Double -> Bool ->
-           IO (VIDimAsgn, Params, Double)
+           IO (PVIEModel, Double)
   outer _ asgn params last_val False =
     -- If our last iteration of the outer loop did not improve, we are done, and
     -- return the current assignment, parameters, and value
-    return (asgn, params, last_val)
+    return (PVIEModel asgn params, last_val)
 
   outer g asgn params last_val True =
     do
@@ -730,7 +864,7 @@ pvie d log_p = init_pvie where
   -- pre-allocated scratch space for parameters, and whether we have already
   -- seen improvement in this iteration of the outer loop
   inner :: MWC.GenIO -> VIDimAsgn -> Params -> Double -> VIDimVar ->
-           MutParams -> Bool -> IO (VIDimAsgn, Params, Double)
+           MutParams -> Bool -> IO (PVIEModel, Double)
   inner g asgn last_params last_val next_var _ improved
     | next_var == viDimFirstUnusedVar (viDistDim d)
     = outer g asgn last_params last_val improved
@@ -741,7 +875,7 @@ pvie d log_p = init_pvie where
     -- Copy our current best parameters into our scratch area
     runGrowM (viDistGrowParams d) asgn new_asgn last_params scratch
     -- Optimize those parameters
-    new_val <- optimize (neg_elbo_with_grad g d log_p asgn) scratch
+    new_val <- optimize opts (neg_elbo_with_grad g d log_p asgn) scratch
     -- Test how much we improved
     if last_val - new_val >= pvie_epsilon then
       -- If we did improve, swap last_params and scratch, then iterate
