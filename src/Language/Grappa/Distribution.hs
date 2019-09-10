@@ -627,7 +627,7 @@ exponentialDensityUnchecked rate x = Log.Exp $ log rate - rate * x
 
 exponentialDensity :: (Ord a, RealFloat a, Log.Precise a) => a -> a -> Log.Log a
 exponentialDensity rate x =
-  if x > 0 then exponentialDensityUnchecked rate x else 0
+  if rate > 0 then exponentialDensityUnchecked rate x else 0
 
 instance PDFDist Exponential where
   distDensity (Exponential rate) = Prob . exponentialDensity rate
