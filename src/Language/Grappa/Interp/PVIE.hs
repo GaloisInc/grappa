@@ -717,7 +717,7 @@ parsePVIEOpts = execParser (info (pvieOptsParser <**> helper)
 
 -- | Print debugging info if the verbosity level is @>= level@
 debugM :: PVIEOpts -> Int -> String -> IO ()
-debugM opts level s | level >= pvieVerbosity opts = traceM s
+debugM opts level s | pvieVerbosity opts >= level = traceM s
 debugM _ _ _ = return ()
 
 -- | Find the parameters that /minimize/ the given differentiable function
@@ -795,7 +795,7 @@ pvie_main dist_expr log_p =
          do (model@(PVIEModel asgn params), val) <-
               pvie_train opts dist_fam log_p
             pp <- applyPPFun (viDistPP dist_fam) asgn params
-            debugM opts 1 $ show pp
+            debugM opts 1 ("Final model:\n" ++ show pp)
             debugM opts 1 ("Surprisal score: " ++ show val)
             writeJSONfile (pvieModelFile opts) model
        PVIEEvalMode ->
