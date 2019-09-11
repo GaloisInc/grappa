@@ -423,6 +423,11 @@ instance Interp__viGamma ProbFunRepr where
 instance Interp__viCategorical ProbFunRepr where
   interp__viCategorical = GExpr categoricalVIFamExpr
 
+instance Interp__viDirichlet ProbFunRepr where
+  interp__viDirichlet =
+    GExpr $ \sz ->
+    xformVIDistFamExpr fromList toList (dirichletVIFamExpr sz)
+
 instance (Eq (ProbFunReprF a), Show (ProbFunReprF a)) =>
          Interp__viDelta ProbFunRepr a where
   interp__viDelta = GExpr deltaVIFamExpr

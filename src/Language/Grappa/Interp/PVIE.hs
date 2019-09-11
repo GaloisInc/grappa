@@ -597,6 +597,19 @@ gammaVIFamExpr =
     Log.ln $
     gammaDensityUnchecked (abs (ps V.! 0)) (abs (ps V.! 1)) (fromDouble x))
 
+-- | Build a distribution family for the dirichlet distribution
+dirichletVIFamExpr :: VIDim -> VIDistFamExpr [R]
+dirichletVIFamExpr dim =
+  simpleVIFamExpr "Dirichlet" dim
+  (\ps -> mwcDirichlet (SV.toList ps))
+  (\ps ->
+    let k = fromIntegral $ SV.length ps
+        alpha0 = SV.sum ps in
+    SV.sum (SV.map logGamma ps) - logGamma alpha0
+    + (alpha0 - k) * digamma alpha0
+    - SV.sum (flip SV.map ps $ \alpha -> (alpha - 1) * digamma alpha))
+  (\x ps -> Log.ln $ dirichletDensity (SV.toList ps) (map fromDouble x))
+
 -- | Bind a fresh dimensionality variable in a distribution family expression
 bindVIDimFamExpr :: (VIDim -> VIDistFamExpr a) -> VIDistFamExpr a
 bindVIDimFamExpr f =

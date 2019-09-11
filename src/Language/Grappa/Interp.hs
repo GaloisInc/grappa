@@ -830,6 +830,9 @@ class ValidExprRepr repr => Interp__viDelta repr a where
 class ValidExprRepr repr => Interp__viCategorical repr where
   interp__viCategorical :: GExpr repr (VISize -> VIDist Int)
 
+class ValidExprRepr repr => Interp__viDirichlet repr where
+  interp__viDirichlet :: GExpr repr (VISize -> VIDist (GList R))
+
 class ValidExprRepr repr => Interp__viTuple0 repr where
   interp__viTuple0 :: GExpr repr (VIDist (GTuple '[]))
 
