@@ -25,6 +25,8 @@ import Language.Grappa.GrappaInternals
 import Language.Grappa.Interp.PVIE
 import GHC.Exts (IsList(..))
 
+import Debug.Trace
+
 -- | Type tag for the representation that views @'Dist' a@ as a function from
 -- @a@ to 'Prob'
 data ProbFunRepr
@@ -347,7 +349,9 @@ instance Interp__dirichlet ProbFunRepr where
 
 instance Interp__categorical ProbFunRepr where
   interp__categorical = GExpr $ \probs x ->
-    if x >= length (toList probs) then 0 else
+    if x >= length (toList probs) then
+      trace ("Categorical: unexpected value x = " ++ show x) 0
+    else
       (toList probs) !! x
 
 instance Interp__ctorDist__ListF ProbFunRepr where
