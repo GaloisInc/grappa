@@ -778,9 +778,9 @@ num_samples = 1000
 negInfinity :: Double
 negInfinity = log 0
 
--- | Test if a 'Double' is negative infinity or NaN
-isNegInfinityOrNaN :: Double -> Bool
-isNegInfinityOrNaN x = (isInfinite x && x < 0) || isNaN x
+-- | Test if a 'Double' is (positive or negative) infinity or NaN
+isInfiniteOrNaN :: Double -> Bool
+isInfiniteOrNaN x = isInfinite x || isNaN x
 
 -- | Compute the negative Evidence Lower BOund (or ELBO) and its gradient
 neg_elbo_with_grad :: GrappaShow a => PVIEOpts -> MWC.GenIO ->
@@ -799,7 +799,7 @@ elbo_with_grad opts g d log_p asgn params grad =
   (replicateM num_samples $
    do s <- runSamplingM (viDistSample d) g asgn params
       return (s, log_p s)) >>= \samples_log_ps ->
-  case find (isNegInfinityOrNaN . snd) samples_log_ps of
+  case find (isInfiniteOrNaN . snd) samples_log_ps of
     Just (bad_samp, p) ->
       -- If any of our samples have 0 probability in our model (i.e., from
       -- log_p), the elbo is -infinity, and the gradient is undefined. However,
@@ -808,10 +808,12 @@ elbo_with_grad opts g d log_p asgn params grad =
       -- those 0 probability samples. That way, our optimization algorithm will
       -- keep trying to reduce the probabilities of generating bad samples until
       -- it finally succeeds. Note that we still return -infinity as the value.
-      do debugM opts 3 ((if isNaN p then "NaN" else "Zero-probability") ++
+      do debugM opts 3 ((if isNaN p then "NaN" else
+                           if p < 0 then "Zero-probability"
+                           else "Infinite (?) probability") ++
                         " sample: " ++ grappaShow bad_samp)
          forM_ samples_log_ps $ \(samp, samp_p) ->
-           when (isNegInfinityOrNaN samp_p) $
+           when (isInfiniteOrNaN samp_p) $
            runParamsGradM (viDistScaledGradPDF d (-1e9) samp) asgn params grad
          return negInfinity
     _ ->
