@@ -601,14 +601,16 @@ gammaVIFamExpr =
 dirichletVIFamExpr :: VIDim -> VIDistFamExpr [R]
 dirichletVIFamExpr dim =
   simpleVIFamExpr "Dirichlet" dim
-  (\ps -> mwcDirichlet (SV.toList ps))
+  (\ps -> mwcDirichlet (SV.toList $ SV.map abs ps))
   (\ps ->
-    let k = fromIntegral $ SV.length ps
-        alpha0 = SV.sum ps in
-    SV.sum (SV.map logGamma ps) - logGamma alpha0
+    let alphas = SV.toList $ SV.map abs ps
+        k = fromIntegral $ SV.length ps
+        alpha0 = sum alphas in
+    sum (map logGamma alphas) - logGamma alpha0
     + (alpha0 - k) * digamma alpha0
-    - SV.sum (flip SV.map ps $ \alpha -> (alpha - 1) * digamma alpha))
-  (\x ps -> Log.ln $ dirichletDensity (SV.toList ps) (map fromDouble x))
+    - sum (flip map alphas $ \alpha -> (alpha - 1) * digamma alpha))
+  (\x ps -> Log.ln $
+            dirichletDensity (SV.toList $ SV.map abs ps) (map fromDouble x))
 
 -- | Bind a fresh dimensionality variable in a distribution family expression
 bindVIDimFamExpr :: (VIDim -> VIDistFamExpr a) -> VIDistFamExpr a
@@ -774,9 +776,9 @@ num_samples = 1000
 negInfinity :: Double
 negInfinity = log 0
 
--- | Test if a 'Double' is negative infinite
-isNegInfinity :: Double -> Bool
-isNegInfinity x = isInfinite x && x < 0
+-- | Test if a 'Double' is negative infinity or NaN
+isNegInfinityOrNaN :: Double -> Bool
+isNegInfinityOrNaN x = (isInfinite x && x < 0) || isNaN x
 
 -- | Compute the negative Evidence Lower BOund (or ELBO) and its gradient
 neg_elbo_with_grad :: GrappaShow a => PVIEOpts -> MWC.GenIO ->
@@ -795,8 +797,8 @@ elbo_with_grad opts g d log_p asgn params grad =
   (replicateM num_samples $
    do s <- runSamplingM (viDistSample d) g asgn params
       return (s, log_p s)) >>= \samples_log_ps ->
-  case find (isNegInfinity . snd) samples_log_ps of
-    Just (bad_samp, _) ->
+  case find (isNegInfinityOrNaN . snd) samples_log_ps of
+    Just (bad_samp, p) ->
       -- If any of our samples have 0 probability in our model (i.e., from
       -- log_p), the elbo is -infinity, and the gradient is undefined. However,
       -- knowing our optimization algorithm, we cheat, and tell it that the
@@ -804,9 +806,10 @@ elbo_with_grad opts g d log_p asgn params grad =
       -- those 0 probability samples. That way, our optimization algorithm will
       -- keep trying to reduce the probabilities of generating bad samples until
       -- it finally succeeds. Note that we still return -infinity as the value.
-      do debugM opts 3 ("Zero-probability sample: " ++ grappaShow bad_samp)
-         forM_ samples_log_ps $ \(samp, p) ->
-           when (isNegInfinity p) $
+      do debugM opts 3 ((if isNaN p then "NaN" else "Zero-probability") ++
+                        " sample: " ++ grappaShow bad_samp)
+         forM_ samples_log_ps $ \(samp, samp_p) ->
+           when (isNegInfinityOrNaN samp_p) $
            runParamsGradM (viDistScaledGradPDF d (-1e9) samp) asgn params grad
          return negInfinity
     _ ->
