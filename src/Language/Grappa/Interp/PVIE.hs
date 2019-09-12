@@ -597,20 +597,22 @@ gammaVIFamExpr =
     Log.ln $
     gammaDensityUnchecked (abs (ps V.! 0)) (abs (ps V.! 1)) (fromDouble x))
 
--- | Build a distribution family for the dirichlet distribution
+-- | Build a distribution family for the dirichlet distribution, where the
+-- alphas are in log space, so they can never be negative and so that the
+-- optimization can do better at picking very small alphas
 dirichletVIFamExpr :: VIDim -> VIDistFamExpr [R]
 dirichletVIFamExpr dim =
   simpleVIFamExpr "Dirichlet" dim
-  (\ps -> mwcDirichlet (SV.toList $ SV.map abs ps))
+  (\ps -> mwcDirichlet (SV.toList $ SV.map exp ps))
   (\ps ->
-    let alphas = SV.toList $ SV.map abs ps
+    let alphas = SV.toList $ SV.map exp ps
         k = fromIntegral $ SV.length ps
         alpha0 = sum alphas in
     sum (map logGamma alphas) - logGamma alpha0
     + (alpha0 - k) * digamma alpha0
     - sum (flip map alphas $ \alpha -> (alpha - 1) * digamma alpha))
   (\x ps -> Log.ln $
-            dirichletDensity (SV.toList $ SV.map abs ps) (map fromDouble x))
+            dirichletDensity (SV.toList $ SV.map exp ps) (map fromDouble x))
 
 -- | Bind a fresh dimensionality variable in a distribution family expression
 bindVIDimFamExpr :: (VIDim -> VIDistFamExpr a) -> VIDistFamExpr a
@@ -815,12 +817,14 @@ elbo_with_grad opts g d log_p asgn params grad =
     _ ->
       do let n = fromIntegral num_samples
          entr <- runParamsGradM (viDistEntropy d) asgn params grad
+         debugM opts 4 ("Entropy: " ++ show entr)
          forM_ samples_log_ps $ \(samp, p) ->
            runParamsGradM (viDistScaledGradPDF d (p / n) samp) asgn params grad
          -- grad_const <- SV.unsafeFreeze grad
          -- traceM ("grad = " ++ show grad_const)
          let ret = entr + (1/n) * sum (map snd samples_log_ps)
          -- traceM ("surprisal = " ++ show ret)
+         debugM opts 4 ("Sample 0: " ++ grappaShow (fst $ head samples_log_ps))
          return ret
 
 -- | The main entrypoint for the PVIE engine
