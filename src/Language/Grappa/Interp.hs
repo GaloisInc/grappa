@@ -809,6 +809,14 @@ class (ValidExprRepr repr, Show a) => Interp__gtrace repr a b where
 -- | The Grappa type of size expressions used in VI distribution families
 data VISize
 
+instance Num VISize where
+  sz + _ = sz
+  sz - _ = sz
+  sz * _ = sz
+  abs sz = sz
+  signum sz = sz
+  fromInteger _ = error "fromInteger: VISize"
+
 -- | The Grappa type of VI distribution families
 data VIDist a
 
