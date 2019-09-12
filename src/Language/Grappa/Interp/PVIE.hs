@@ -480,10 +480,10 @@ xformVIDistFam f_to f_from (VIDistFam {..}) =
     ..
   }
 
--- | The distribution family over lists with a given length whose elements are
+-- | The distribution family over vectors with a given length whose elements are
 -- drawn IID from the supplied distribution family
-iidVIFam :: VIDim -> VIDistFam a -> VIDistFam (Vector a)
-iidVIFam len d =
+vecIIDVIFam :: VIDim -> VIDistFam a -> VIDistFam (Vector a)
+vecIIDVIFam len d =
   VIDistFam
   { viDistDim = len * viDistDim d
   , viDistSample =
@@ -636,11 +636,17 @@ xformVIDistFamExpr :: (a -> b) -> (b -> a) -> VIDistFamExpr a -> VIDistFamExpr b
 xformVIDistFamExpr f_to f_from expr =
   VIDistFamExpr (xformVIDistFam f_to f_from <$> runVIDistFamExpr expr)
 
+-- | The distribution family expression over vectors with a given length whose
+-- elements are drawn IID from the supplied distribution family expression
+vecIIDVIFamExpr :: VIDim -> VIDistFamExpr a -> VIDistFamExpr (Vector a)
+vecIIDVIFamExpr len d_expr =
+  VIDistFamExpr (vecIIDVIFam len <$> runVIDistFamExpr d_expr)
+
 -- | The distribution family expression over lists with a given length whose
 -- elements are drawn IID from the supplied distribution family expression
-iidVIFamExpr :: VIDim -> VIDistFamExpr a -> VIDistFamExpr (Vector a)
+iidVIFamExpr :: VIDim -> VIDistFamExpr a -> VIDistFamExpr [a]
 iidVIFamExpr len d_expr =
-  VIDistFamExpr (iidVIFam len <$> runVIDistFamExpr d_expr)
+  xformVIDistFamExpr V.toList V.fromList $ vecIIDVIFamExpr len d_expr
 
 -- | This distribution family is a delta distribution (i.e., one that always
 -- returns the same value, like 'deltaVIFamExpr') that reads its input from

@@ -860,7 +860,10 @@ class ValidExprRepr repr => Interp__viTuple4 repr a b c d where
                                   VIDist d -> VIDist (GTuple '[a, b, c, d]))
 
 class ValidExprRepr repr => Interp__viIID repr a where
-  interp__viIID :: GExpr repr (VISize -> VIDist a -> VIDist (Vector a))
+  interp__viIID :: GExpr repr (VISize -> VIDist a -> VIDist (GList a))
+
+class ValidExprRepr repr => Interp__viVecIID repr a where
+  interp__viVecIID :: GExpr repr (VISize -> VIDist a -> VIDist (Vector a))
 
 class ValidExprRepr repr => Interp__viJSONInput repr a where
   interp__viJSONInput :: GExpr repr (VIDist a)

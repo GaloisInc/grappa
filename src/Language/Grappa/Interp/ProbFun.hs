@@ -469,4 +469,9 @@ instance Interp__viTuple4 ProbFunRepr a b c d where
                     (Compose $ xformVIDistFamExpr GExpr unGExpr dd))
 
 instance Interp__viIID ProbFunRepr a where
-  interp__viIID = GExpr iidVIFamExpr
+  interp__viIID =
+    GExpr $ \sz d ->
+    xformVIDistFamExpr fromList toList (iidVIFamExpr sz d)
+
+instance Interp__viVecIID ProbFunRepr a where
+  interp__viVecIID = GExpr vecIIDVIFamExpr
