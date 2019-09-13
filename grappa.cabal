@@ -158,7 +158,7 @@ library
   --                   , data-default-class
 
   c-sources: cbits/optimize_lbfgs.cpp
-  include-dirs: cbits/Eigen cbits/lbfgspp/include
+  include-dirs: cbits/eigen cbits/lbfgspp/include
 
   if flag(show-splices)
     ghc-options: -ddump-splices
