@@ -31,7 +31,7 @@ model poisson_seq rate { len, deltas } =
 model poisson_interarrival (k::Double) (theta::Double) { raw_rate, (len, poisson_seqs) } =
   -- rate ~ gamma k theta
   raw_rate ~ arbitrary
-  rate = abs raw_rate
+  rate = abs raw_rate + (exp (-100)) -- Rate should never be 0
   len ~ arbitrary
   -- len ~ delta 10
   poisson_seqs ~ vec_iid len (poisson_seq rate)
