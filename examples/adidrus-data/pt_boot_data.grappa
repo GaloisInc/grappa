@@ -1,0 +1,44 @@
+
+--
+-- A model of a sequence of integers drawn from a categorical distribution
+--
+
+fun replicate (0::Int) _ = Nil
+    replicate n x = Cons x (replicate (n - 1) x)
+
+fun map _ Nil = Nil
+    map f (Cons x xs) = Cons (f x) (map f xs)
+
+fun sum Nil = 0
+    sum (Cons x xs) = x + sum xs
+
+model iid (0::Int) _ { Nil } = nothing
+      iid n d { Cons x xs } =
+        x ~ d
+        xs ~ iid (n-1) d
+
+model mapD df Nil { Nil } = nothing
+      mapD df (Cons x xs) { Cons y ys } =
+        y ~ df x
+        ys ~ mapD df xs
+
+model categorical_seq log_probs { num_xs, xs } =
+  num_xs ~ arbitrary
+  xs ~ vec_iid num_xs (categorical log_probs)
+
+model categorical_seqs (alpha :: Double) { num_probs, probs, (num_xss, xss) } =
+  num_probs ~ (arbitrary :: Dist Int)
+
+  -- raw_probs ~ iid num_probs (gamma alpha 1)
+  -- log_total_raw_prob = log (sum raw_probs)
+  -- log_probs = map (\p -> logRealToProb (log p - log_total_raw_prob)) raw_probs
+  probs ~ dirichlet (Cons 5.0 (Cons 1.0 (replicate (num_probs -2) alpha)))
+  -- probs ~ (arbitrary :: Dist [Double])
+  log_probs = map realToProb probs
+
+  num_xss ~ arbitrary
+  xss ~ vec_iid num_xss (categorical_seq log_probs)
+
+main =
+  _ ~ categorical_seqs 0.000001
+  using pvie (viTuple3 (viDelta 12) (viDirichlet 12) viJSONInput)
