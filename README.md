@@ -8,6 +8,13 @@ Grappa currently only supports developer installs; see below.
 
 To do a developer install of Grappa:
 
+0. Ensure that the developer packages for BLAS, LAPACK, and GSL are all
+   installed. On Linux, these are called blas-devel, lapack-devel, and
+   gsl-devel, and they can be installed with apt-get (on Ubuntu and friends) or
+   yum (on CentOS and friends). On OSX, BLAS and LAPACK are already installed,
+   so all you need to install is GSL, which you can do manually or using
+   homebrew.
+
 1. Execute the supplied `build.sh` script from the Grappa distribution
    directory, with the following command:
 
