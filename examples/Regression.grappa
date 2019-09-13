@@ -80,7 +80,8 @@ main =
 -}
 
 main =
-  (_, _, read "examples/regression.csv" as csv) ~ linear_lnoise 40 0.5
-  using nuts (500, 50)
+  (_, _, read "examples/regression.csv" as csv) ~ linear_lnoise 400 0.05
+  using pvie (viTuple3 viNormal viNormal viJSONInput)
+  -- using nuts (500, 50)
   -- using hmc (10,10,0.01)
   -- using hmcda (30,30,2)
