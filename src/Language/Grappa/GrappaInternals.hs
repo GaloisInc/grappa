@@ -703,6 +703,9 @@ class GrappaShow t where
 instance GrappaShow Double where
   grappaShow = show
 
+instance GrappaShow Prob where
+  grappaShow = show
+
 instance GrappaShow Int where
   grappaShow = show
 

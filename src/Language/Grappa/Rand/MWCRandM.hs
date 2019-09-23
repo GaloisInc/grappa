@@ -120,6 +120,81 @@ parMapM f xs =
 
 
 ----------------------------------------------------------------------
+-- Drawing Random Variables in Log Space
+----------------------------------------------------------------------
+
+-- FIXME: We currently draw from the uniform distribution in log space by
+-- drawing from the uniform distribution in standard space and then taking the
+-- log, but this loses precision. The preferred method would be to generate a
+-- sample @U ~ exponential@ and then return @-U@, except that the standard way
+-- to sample from the exponential distribution is to use this trick the other
+-- way, sampling from the uniform and then taking the negative log. So figuring
+-- out a better way to do this would require some work...
+instance MWC.Variate (Log.Log Double) where
+  uniform gen = Log.Exp <$> log <$> MWC.uniform gen
+  uniformR (Log.Exp lo,Log.Exp hi) gen =
+    Log.Exp <$> log <$> MWC.uniformR (lo,hi) gen
+
+-- | Sample the @gamma(k,theta)@ distribution in log space. When @k*theta@ gets
+-- very small (as in, between @0@ and @2^-20@ or so), just sampling the @gamma@
+-- distribution in standard space and then taking the logarithm tends to yield
+-- numbers that are too small to represent as 'Double's, and so they get
+-- truncated to 0. So, instead, this function does the entire sampling procedure
+-- in log space.
+--
+-- This code is adapted from the existing code for 'MWC.gamma'.
+mwcGammaLogLog :: Log.Log Double -> Log.Log Double -> MWCRandM (Log.Log Double)
+mwcGammaLogLog a b = mainloop where
+  mainloop = do
+    (x, v) <- innerloop
+    u      <- random MWC.uniform
+    let cont =  u > 1 - 0.331 * sqr (sqr x)
+          && log u > 0.5 * sqr x + a1_std * (1 - v + log v) -- Rarely evaluated
+    case () of
+      _| cont      -> mainloop
+       | a >= 1    -> return $! a1 * Log.Exp (log v) * b
+       | otherwise -> do y <- random MWC.uniform
+                         return $! y ** (1 / a) * a1 * Log.Exp (log v) * b
+  -- inner loop
+  innerloop = do
+    x <- random MWC.standard
+    case 1 + a2*x of
+      v | v <= 0    -> innerloop
+        | otherwise -> return $! (x, (v*v*v))
+
+  sqr x = x*x
+
+  -- constants
+  a' = if a < 1 then a + 1 else a
+  a1 = a' - 1/3
+  a1_std = exp $ Log.ln a1
+  a2 = 1 / sqrt(9 * a1_std)
+
+
+mwcGammaLog :: Double -> Double -> MWCRandM (Log.Log Double)
+mwcGammaLog a b | a >= 1 = Log.Exp <$> log <$> mwcGamma a b
+mwcGammaLog a b =
+  do x <- mwcGammaLog (a+1) b
+     y <- random MWC.uniform
+     return $ Log.Exp (Log.ln y / a) * Log.Exp (log (a+2/3)) * x
+
+
+-- | Sample a Dirichlet distribution in log space
+mwcDirichletLogLog :: [Log.Log R] -> MWCRandM [Log.Log R]
+mwcDirichletLogLog alphas =
+  do raw_xs <- mapM (\alpha -> mwcGammaLogLog alpha 1) alphas
+     let total = sum raw_xs
+     return $ map (/ total) raw_xs
+
+-- | Sample a Dirichlet distribution in log space
+mwcDirichletLog :: [R] -> MWCRandM [Log.Log R]
+mwcDirichletLog alphas =
+  do raw_xs <- mapM (\alpha -> mwcGammaLog alpha 1) alphas
+     let total = sum raw_xs
+     return $ map (/ total) raw_xs
+
+
+----------------------------------------------------------------------
 -- Implementing various distributions in MWCRandM
 ----------------------------------------------------------------------
 

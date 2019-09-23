@@ -597,6 +597,22 @@ gammaVIFamExpr =
     Log.ln $
     gammaDensityUnchecked (abs (ps V.! 0)) (abs (ps V.! 1)) (fromDouble x))
 
+-- | Build a distribution family expression for the gamma distribution over
+-- probabilities, i.e., in log space, where the @k@ and @theta@ parameters are
+-- also in log space
+gammaProbVIFamExpr :: VIDistFamExpr Prob
+gammaProbVIFamExpr =
+  simpleVIFamExpr "GammaProb" 2
+  (\ps -> Prob <$> mwcGammaLogLog (Log.Exp (ps SV.! 0)) (Log.Exp (ps SV.! 1)))
+  (\ps ->
+    let k = exp (ps SV.! 0)
+        log_theta = ps SV.! 1 in
+    k + log_theta + logGamma k + (1-k) * digamma k)
+  (\x ps ->
+    Log.ln $
+    gammaDensityUnchecked (exp (ps V.! 0)) (exp (ps V.! 1))
+    (fromDouble $ probToLogR x))
+
 -- | Build a distribution family for the dirichlet distribution, where the
 -- alphas are in log space, so they can never be negative and so that the
 -- optimization can do better at picking very small alphas
@@ -613,6 +629,25 @@ dirichletVIFamExpr dim =
     - sum (flip map alphas $ \alpha -> (alpha - 1) * digamma alpha))
   (\x ps -> Log.ln $
             dirichletDensity (SV.toList $ SV.map exp ps) (map fromDouble x))
+
+-- | Build a distribution family for the dirichlet distribution over
+-- probabilities, i.e., over lists of reals in log space. The alphas are in log
+-- space, so they can never be negative and so that the optimization can do
+-- better at picking very small alphas
+dirichletProbVIFamExpr :: VIDim -> VIDistFamExpr [Prob]
+dirichletProbVIFamExpr dim =
+  simpleVIFamExpr "DirichletProb" dim
+  (\ps -> map Prob <$> mwcDirichletLog (SV.toList $ SV.map exp ps))
+  (\ps ->
+    let alphas = SV.toList $ SV.map exp ps
+        k = fromIntegral $ SV.length ps
+        alpha0 = sum alphas in
+    sum (map logGamma alphas) - logGamma alpha0
+    + (alpha0 - k) * digamma alpha0
+    - sum (flip map alphas $ \alpha -> (alpha - 1) * digamma alpha))
+  (\x ps -> Log.ln $
+            dirichletDensityLog (SV.toList $ SV.map exp ps)
+            (map (fmap fromDouble . fromProb) x))
 
 -- | Bind a fresh dimensionality variable in a distribution family expression
 bindVIDimFamExpr :: (VIDim -> VIDistFamExpr a) -> VIDistFamExpr a
@@ -825,7 +860,7 @@ elbo_with_grad opts g d log_p asgn params grad =
     _ ->
       do let n = fromIntegral num_samples
          entr <- runParamsGradM (viDistEntropy d) asgn params grad
-         debugM opts 4 ("Entropy: " ++ show entr)
+         debugM opts 2 ("Entropy: " ++ show entr)
          forM_ samples_log_ps $ \(samp, p) ->
            runParamsGradM (viDistScaledGradPDF d (p / n) samp) asgn params grad
          -- grad_const <- SV.unsafeFreeze grad

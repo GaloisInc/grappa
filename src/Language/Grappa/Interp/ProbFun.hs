@@ -347,6 +347,10 @@ instance Interp__dirichlet ProbFunRepr where
   interp__dirichlet = GExpr $ \alphas xs ->
     Prob $ dirichletDensity (toList alphas) (toList xs)
 
+instance Interp__dirichletProb ProbFunRepr where
+  interp__dirichletProb = GExpr $ \alphas xs ->
+    Prob $ dirichletDensityLog (toList alphas) (map fromProb $ toList xs)
+
 instance Interp__categorical ProbFunRepr where
   interp__categorical = GExpr $ \probs x ->
     if x >= length (toList probs) then
@@ -424,6 +428,9 @@ instance Interp__viUniform ProbFunRepr where
 instance Interp__viGamma ProbFunRepr where
   interp__viGamma = GExpr gammaVIFamExpr
 
+instance Interp__viGammaProb ProbFunRepr where
+  interp__viGammaProb = GExpr gammaProbVIFamExpr
+
 instance Interp__viCategorical ProbFunRepr where
   interp__viCategorical = GExpr categoricalVIFamExpr
 
@@ -431,6 +438,11 @@ instance Interp__viDirichlet ProbFunRepr where
   interp__viDirichlet =
     GExpr $ \sz ->
     xformVIDistFamExpr fromList toList (dirichletVIFamExpr sz)
+
+instance Interp__viDirichletProb ProbFunRepr where
+  interp__viDirichletProb =
+    GExpr $ \sz ->
+    xformVIDistFamExpr fromList toList (dirichletProbVIFamExpr sz)
 
 instance (Eq (ProbFunReprF a), Show (ProbFunReprF a)) =>
          Interp__viDelta ProbFunRepr a where

@@ -686,6 +686,9 @@ class ValidExprRepr repr => Interp__beta repr where
 class ValidExprRepr repr => Interp__dirichlet repr where
   interp__dirichlet :: GExpr repr (GList R -> Dist (GList R))
 
+class ValidExprRepr repr => Interp__dirichletProb repr where
+  interp__dirichletProb :: GExpr repr (GList R -> Dist (GList Prob))
+
 class ValidExprRepr repr => Interp__categorical repr where
   interp__categorical :: GExpr repr (GList Prob -> Dist Int)
 
@@ -832,6 +835,9 @@ class ValidExprRepr repr => Interp__viUniform repr where
 class ValidExprRepr repr => Interp__viGamma repr where
   interp__viGamma :: GExpr repr (VIDist Double)
 
+class ValidExprRepr repr => Interp__viGammaProb repr where
+  interp__viGammaProb :: GExpr repr (VIDist Prob)
+
 class ValidExprRepr repr => Interp__viDelta repr a where
   interp__viDelta :: GExpr repr (a -> VIDist a)
 
@@ -840,6 +846,9 @@ class ValidExprRepr repr => Interp__viCategorical repr where
 
 class ValidExprRepr repr => Interp__viDirichlet repr where
   interp__viDirichlet :: GExpr repr (VISize -> VIDist (GList R))
+
+class ValidExprRepr repr => Interp__viDirichletProb repr where
+  interp__viDirichletProb :: GExpr repr (VISize -> VIDist (GList Prob))
 
 class ValidExprRepr repr => Interp__viTuple0 repr where
   interp__viTuple0 :: GExpr repr (VIDist (GTuple '[]))

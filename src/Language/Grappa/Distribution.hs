@@ -695,6 +695,15 @@ dirichletDensity alphas xs =
   sum (zipWith (\alpha x -> (alpha - 1) * log x) alphas xs) -
   Log.ln (logMVBeta alphas)
 
+-- | Calculate the density of the Dirichlet distribution over log space
+dirichletDensityLog :: (HasGamma a, Floating a) => [a] -> [Log.Log a] ->
+                       Log.Log a
+dirichletDensityLog alphas xs =
+  -- x_1 ** (alpha_1 - 1) * ... * x_n ** (alpha_n - 1) / Beta (alphas)
+  Log.Exp $
+  sum (zipWith (\alpha x -> (alpha - 1) * Log.ln x) alphas xs) -
+  Log.ln (logMVBeta alphas)
+
 instance PDFDist Dirichlet where
   distDensity (Dirichlet alphas) xs = Prob $ dirichletDensity alphas xs
 
