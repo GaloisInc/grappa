@@ -2,7 +2,7 @@
 fun replicate (0::Int) _ = Nil
     replicate n x = Cons x (replicate (n - 1) x)
 
-model categorical_seq (alpha :: Double) { num_probs, probs, (num_xs, xs) } =
+model categorical_seq alpha { num_probs, probs, (num_xs, xs) } =
   num_probs ~ arbitrary
   probs ~ dirichletProb (replicate num_probs alpha)
   num_xs ~ arbitrary
