@@ -692,6 +692,9 @@ class ValidExprRepr repr => Interp__dirichletProb repr where
 class ValidExprRepr repr => Interp__categorical repr where
   interp__categorical :: GExpr repr (GList Prob -> Dist Int)
 
+class ValidExprRepr repr => Interp__poisson repr where
+  interp__poisson :: GExpr repr (R -> Dist Int)
+
 class ValidExprRepr repr => Interp__ctorDist__ListF repr where
   interp__ctorDist__Nil ::
     GExpr repr (Dist (GTuple '[]) -> Dist (GList a))

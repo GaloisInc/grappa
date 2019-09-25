@@ -358,6 +358,16 @@ instance Interp__categorical ProbFunRepr where
     else
       (toList probs) !! x
 
+instance Interp__poisson ProbFunRepr where
+  interp__poisson = GExpr $ \rate k ->
+    if rate < 0 then error "Poisson: rate < 0!" else
+      if rate == 0 then
+        if k == 0 then 1 else 0
+      else
+        if k < 0 then 0 else
+          Prob $ Log.Exp $
+          fromIntegral k * log rate - rate - logGamma (fromIntegral $ k + 1)
+
 instance Interp__ctorDist__ListF ProbFunRepr where
   interp__ctorDist__Nil = GExpr $ \d xs ->
     case xs of
