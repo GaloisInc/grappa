@@ -683,6 +683,9 @@ class ValidExprRepr repr => Interp__gamma repr where
 class ValidExprRepr repr => Interp__beta repr where
   interp__beta :: GExpr repr (R -> R -> Dist R)
 
+class ValidExprRepr repr => Interp__betaProb repr where
+  interp__betaProb :: GExpr repr (R -> R -> Dist Prob)
+
 class ValidExprRepr repr => Interp__dirichlet repr where
   interp__dirichlet :: GExpr repr (GList R -> Dist (GList R))
 

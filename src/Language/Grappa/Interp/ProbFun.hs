@@ -343,6 +343,10 @@ instance Interp__gamma ProbFunRepr where
 instance Interp__beta ProbFunRepr where
   interp__beta = GExpr $ \alpha beta x -> Prob $ betaDensity alpha beta x
 
+instance Interp__betaProb ProbFunRepr where
+  interp__betaProb = GExpr $ \alpha beta p ->
+    Prob $ betaDensityLog alpha beta (fromProb p)
+
 instance Interp__dirichlet ProbFunRepr where
   interp__dirichlet = GExpr $ \alphas xs ->
     Prob $ dirichletDensity (toList alphas) (toList xs)

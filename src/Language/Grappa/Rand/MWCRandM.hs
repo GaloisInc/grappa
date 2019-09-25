@@ -170,6 +170,14 @@ mwcGammaLogLog a b = mainloop where
   a1_std = exp $ Log.ln a1
   a2 = 1 / sqrt(9 * a1_std)
 
+-- | Sample the @beta(alpha,beta)@ distribution in log space, where @alpha@ and
+-- @beta@ are also in log space. This code is adapted from the existing code for
+-- 'MWC.beta'.
+mwcBetaLogLog :: Log.Log Double -> Log.Log Double -> MWCRandM (Log.Log Double)
+mwcBetaLogLog alpha beta =
+  do x <- mwcGammaLogLog alpha 1
+     y <- mwcGammaLogLog beta 1
+     return $ x / (x+y)
 
 mwcGammaLog :: Double -> Double -> MWCRandM (Log.Log Double)
 mwcGammaLog a b | a >= 1 = Log.Exp <$> log <$> mwcGamma a b

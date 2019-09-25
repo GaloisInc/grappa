@@ -647,6 +647,17 @@ betaDensity :: (Ord a, HasGamma a, RealFloat a, Log.Precise a) =>
 betaDensity alpha beta x =
   if x > 0 && x < 1 then betaDensityUnchecked alpha beta x else 0
 
+-- | Compute the PDF of the Beta distribution where the argument is already in
+-- log space
+betaDensityLog :: (Ord a, HasGamma a, RealFloat a, Log.Precise a) =>
+                  a -> a -> Log.Log a -> Log.Log a
+betaDensityLog alpha beta x =
+  if x > 0 && x < 1 then
+    Log.Exp $
+    ((alpha - 1) * Log.ln x) + ((beta - 1) * Log.ln (1 - x)) -
+    (logGamma alpha + logGamma alpha - logGamma (alpha + beta))
+  else 0
+
 instance PDFDist Beta where
   distDensity (Beta alpha beta) = Prob . betaDensity alpha beta
 

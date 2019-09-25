@@ -185,7 +185,8 @@ instance ADR.Reifies s ADR.Tape => FromDouble (ADR.Reverse s Double) where
   fromDouble = ADR.auto
 
 -- | All the typeclasses we want for types used in differentiable functions
-type DiffConstr a = (RealFloat a, Ord a, Show a, FromDouble a, HasGamma a)
+type DiffConstr a = (RealFloat a, Ord a, Show a, FromDouble a,
+                     HasGamma a, Log.Precise a)
 
 -- | The type of functions that are differentiable using AD
 type DiffFun = forall r. DiffConstr r => Vector r -> r
@@ -612,6 +613,24 @@ gammaProbVIFamExpr =
     Log.ln $
     gammaDensityUnchecked (exp (ps V.! 0)) (exp (ps V.! 1))
     (fromDouble $ probToLogR x))
+
+-- | Build a distribution family expression for the beta distribution over
+-- probabilities, i.e., in log space, where the @alpha@ and @beta@ parameters
+-- are also in log space
+betaProbVIFamExpr :: VIDistFamExpr Prob
+betaProbVIFamExpr =
+  simpleVIFamExpr "BetaProb" 2
+  (\ps -> Prob <$> mwcBetaLogLog (Log.Exp (ps SV.! 0)) (Log.Exp (ps SV.! 1)))
+  (\ps ->
+    let alpha = exp (ps SV.! 0)
+        beta = exp (ps SV.! 1) in
+    logGamma alpha + logGamma beta - logGamma (alpha + beta)
+    + (alpha + beta - 2) * digamma (alpha + beta)
+    - (alpha - 1) * digamma alpha - (beta - 1) * digamma beta)
+  (\x ps ->
+    Log.ln $
+    betaDensityLog (exp (ps V.! 0)) (exp (ps V.! 1))
+    (fmap fromDouble $ fromProb x))
 
 -- | Build a distribution family for the dirichlet distribution, where the
 -- alphas are in log space, so they can never be negative and so that the
