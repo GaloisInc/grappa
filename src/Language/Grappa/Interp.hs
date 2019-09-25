@@ -847,6 +847,12 @@ class ValidExprRepr repr => Interp__viGamma repr where
 class ValidExprRepr repr => Interp__viGammaProb repr where
   interp__viGammaProb :: GExpr repr (VIDist Prob)
 
+class ValidExprRepr repr => Interp__viBeta repr where
+  interp__viBeta :: GExpr repr (VIDist Double)
+
+class ValidExprRepr repr => Interp__viBetaProb repr where
+  interp__viBetaProb :: GExpr repr (VIDist Prob)
+
 class ValidExprRepr repr => Interp__viDelta repr a where
   interp__viDelta :: GExpr repr (a -> VIDist a)
 

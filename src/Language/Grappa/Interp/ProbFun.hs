@@ -449,6 +449,12 @@ instance Interp__viGamma ProbFunRepr where
 instance Interp__viGammaProb ProbFunRepr where
   interp__viGammaProb = GExpr gammaProbVIFamExpr
 
+instance Interp__viBeta ProbFunRepr where
+  interp__viBeta = GExpr betaVIFamExpr
+
+instance Interp__viBetaProb ProbFunRepr where
+  interp__viBetaProb = GExpr betaProbVIFamExpr
+
 instance Interp__viCategorical ProbFunRepr where
   interp__viCategorical = GExpr categoricalVIFamExpr
 

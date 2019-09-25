@@ -614,6 +614,21 @@ gammaProbVIFamExpr =
     gammaDensityUnchecked (exp (ps V.! 0)) (exp (ps V.! 1))
     (fromDouble $ probToLogR x))
 
+-- | Build a distribution family expression for the beta distribution, where
+-- we use absolute value of @alpha@ and @beta@ to keep them non-negative
+betaVIFamExpr :: VIDistFamExpr R
+betaVIFamExpr =
+  simpleVIFamExpr "Beta" 2 (\ps -> mwcBeta (abs (ps SV.! 0)) (abs (ps SV.! 1)))
+  (\ps ->
+    let alpha = abs (ps SV.! 0)
+        beta = abs (ps SV.! 1) in
+    logGamma alpha + logGamma beta - logGamma (alpha + beta)
+    + (alpha + beta - 2) * digamma (alpha + beta)
+    - (alpha - 1) * digamma alpha - (beta - 1) * digamma beta)
+  (\x ps ->
+    Log.ln $
+    betaDensityUnchecked (abs (ps V.! 0)) (abs (ps V.! 1)) (fromDouble x))
+
 -- | Build a distribution family expression for the beta distribution over
 -- probabilities, i.e., in log space, where the @alpha@ and @beta@ parameters
 -- are also in log space

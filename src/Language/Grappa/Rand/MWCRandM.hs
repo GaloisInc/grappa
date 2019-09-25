@@ -102,6 +102,10 @@ mwcExponential rate = random $ MWC.exponential rate
 mwcGamma :: Double -> Double -> MWCRandM Double
 mwcGamma k theta = random $ MWC.gamma k theta
 
+-- | Generate a beta random variable in 'MWCRandM'
+mwcBeta :: Double -> Double -> MWCRandM Double
+mwcBeta alpha beta = random $ MWC.beta alpha beta
+
 -- | Generate a dirichlet-distributed list
 mwcDirichlet :: [R] -> MWCRandM [R]
 mwcDirichlet alphas = random $ MWC.dirichlet alphas
