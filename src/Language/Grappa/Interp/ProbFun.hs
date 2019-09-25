@@ -368,6 +368,10 @@ instance Interp__poisson ProbFunRepr where
           Prob $ Log.Exp $
           fromIntegral k * log rate - rate - logGamma (fromIntegral $ k + 1)
 
+instance Interp__binary_mixture ProbFunRepr a where
+  interp__binary_mixture = GExpr $ \p d1 d2 x ->
+    p * d1 x + (1 - p) * d2 x
+
 instance Interp__ctorDist__ListF ProbFunRepr where
   interp__ctorDist__Nil = GExpr $ \d xs ->
     case xs of
