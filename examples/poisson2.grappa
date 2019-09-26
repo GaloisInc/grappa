@@ -1,0 +1,18 @@
+
+model poisson2_seq rate1 rate2 p { (num_xs, xs) } =
+  num_xs ~ arbitrary
+  xs ~ vec_iid num_xs (binary_mixture p (poisson rate1) (poisson rate2))
+
+model poisson2_seqs alpha1 beta1 (alpha2 :: Double) (beta2 :: Double) (alpha_p :: Double) (beta_p :: Double) { rate1, rate2, p, (num_xss, xss) } =
+  rate1 ~ gamma alpha1 beta1
+  -- rate2 ~ gamma alpha2 beta2
+  rate2 ~ arbitrary
+  -- p ~ betaProb alpha_p beta_p
+  p ~ arbitrary
+  num_xss ~ arbitrary
+  xss ~ vec_iid num_xss (poisson2_seq rate1 rate2 p)
+
+main =
+  -- _ ~ poisson2_seqs 0.01 0.01 1 10 0.001 10
+  _ ~ poisson2_seqs 0.01 0.01 0.01 0.01 0.001 10
+  using pvie (viTuple4 viGamma viGamma viBetaProb viJSONInput)

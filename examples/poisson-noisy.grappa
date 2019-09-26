@@ -1,0 +1,17 @@
+
+fun replicate (0::Int) _ = Nil
+    replicate n x = Cons x (replicate (n - 1) x)
+
+model poisson_noisy_seq rate err { (num_xs, xs) } =
+  num_xs ~ arbitrary
+  xs ~ vec_iid num_xs (binary_mixture err (categorical (replicate 12 (1/12))) (poisson rate))
+
+model poisson_seqs alpha1 beta1 alpha2 beta2 { rate, err, (num_xss, xss) } =
+  rate ~ gamma alpha1 beta1
+  err ~ betaProb alpha2 beta2
+  num_xss ~ arbitrary
+  xss ~ vec_iid num_xss (poisson_noisy_seq rate err)
+
+main =
+  _ ~ poisson_seqs 0.01 0.01 0.001 10
+  using pvie (viTuple3 viGamma viBetaProb viJSONInput)

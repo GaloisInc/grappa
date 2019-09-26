@@ -1,0 +1,13 @@
+
+model poisson_seq rate { (num_xs, xs) } =
+  num_xs ~ arbitrary
+  xs ~ vec_iid num_xs (poisson rate)
+
+model poisson_seqs alpha beta { rate, (num_xss, xss) } =
+  rate ~ gamma alpha beta
+  num_xss ~ arbitrary
+  xss ~ vec_iid num_xss (poisson_seq rate)
+
+main =
+  _ ~ poisson_seqs 0.01 0.01
+  using pvie (viTuple2 viGamma viJSONInput)
