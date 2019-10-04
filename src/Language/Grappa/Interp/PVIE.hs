@@ -776,7 +776,8 @@ data PVIEOpts =
   pvieModelFile :: String,
   pvieDataFiles :: [String],
   pvieMode :: PVIEMode,
-  pvieVerbosity :: Int
+  pvieVerbosity :: Int,
+  pvieGD :: Bool
   }
 
 -- | Parser for PVIE command-line options
@@ -801,6 +802,9 @@ pvieOptsParser =
   <*> (option auto (long "verbosity" <> short 'v'
                     <> help "Verbosity level for debugging"
                     <> showDefault <> value 0 <> metavar "VERBOSITY"))
+  <*> (flag False True
+       (long "gd" <>
+        help "Use gradient descent instead of BFGS to optimize (only meaningful in training mode)"))
 
 -- | Parse the command-line options
 parsePVIEOpts :: IO PVIEOpts
@@ -818,6 +822,7 @@ optimize :: PVIEOpts -> (Params -> MutParams -> IO Double) ->
             MutParams -> IO Double
 optimize opts f mut_params =
   do let len = SMV.length mut_params
+     let meth = if pvieGD opts then SteepestDescent else VectorBFGS2
      params <- SV.freeze mut_params
      let eval_f ps =
            unsafePerformIO $
@@ -835,7 +840,7 @@ optimize opts f mut_params =
               debugM opts 2 ("grad = " ++ show ret)
               return ret
      let (opt_params,_) =
-           minimizeVD VectorBFGS2 0.0001 1000 1 0.1 eval_f grad_f params
+           minimizeVD meth 0.0001 1000 1 0.1 eval_f grad_f params
      SV.copy mut_params opt_params
      return $ eval_f opt_params
 
@@ -895,6 +900,8 @@ elbo_with_grad opts g d log_p asgn params grad =
       do let n = fromIntegral num_samples
          entr <- runParamsGradM (viDistEntropy d) asgn params grad
          debugM opts 2 ("Entropy: " ++ show entr)
+         entr_grad <- SV.freeze grad
+         debugM opts 3 ("Entropy grad: " ++ show entr_grad)
          forM_ samples_log_ps $ \(samp, p) ->
            runParamsGradM (viDistScaledGradPDF d (p / n) samp) asgn params grad
          -- grad_const <- SV.unsafeFreeze grad
