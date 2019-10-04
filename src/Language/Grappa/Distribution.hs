@@ -108,7 +108,7 @@ instance ADR.Reifies s ADR.Tape => HasGamma (ADR.Reverse s Double) where
   logGamma x =
     ADR.unary Gamma.logGamma (ADR.Id $ Gamma.digamma $ ADR.primal x) x
   digamma x =
-    ADR.unary Gamma.logGamma (ADR.Id $ trigamma $ ADR.primal x) x
+    ADR.unary Gamma.digamma (ADR.Id $ trigamma $ ADR.primal x) x
 
 
 ----------------------------------------------------------------------
