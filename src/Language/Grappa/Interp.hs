@@ -30,8 +30,6 @@ import Language.Grappa.Distribution
 import Language.Grappa.GrappaInternals
 import Language.Grappa.Frontend.DataSource
 
-import qualified Data.Matrix as M
-
 import Debug.Trace
 
 
@@ -755,37 +753,14 @@ class ValidExprRepr repr => Interp__vec_length repr a where
 class (ValidExprRepr repr) => Interp__mv_normal repr where
   interp__mvNormal :: GExpr repr (RMatrix -> RMatrix -> Dist RMatrix)
 
--- | Build an 'RMatrix' from a list of lists
-matrix_list :: [[R]] -> RMatrix
-matrix_list elems =
-  RMatrix $ M.matrix (length (head elems)) (length elems) $ \(x,y) ->
-  elems !! y !! x
-
--- | Build an 'RMatrix' from a Grappa list of Grappa lists
-matrix :: GList (GList R) -> RMatrix
-matrix glist_elems =
-  matrix_list (fmap toHaskellList $ toHaskellList glist_elems)
-
 class ValidExprRepr repr => Interp__matrix repr where
   interp__matrix :: GExpr repr (GList (GList R) -> RMatrix)
-
--- | Build an 'RMatrix' as a column vector
-vector :: GList R -> RMatrix
-vector elems = matrix_list (map (\x -> [x]) (toHaskellList elems))
 
 class ValidExprRepr repr => Interp__vector repr where
   interp__vector :: GExpr repr (GList R -> RMatrix)
 
--- | Build an 'RMatrix' with a given number of rows and columns from a generator
--- function
-buildMatrix :: Int -> Int -> ((Int,Int) -> R) -> RMatrix
-buildMatrix rows cols f = RMatrix $ M.matrix rows cols f
-
 class ValidExprRepr repr => Interp__buildMatrix repr where
   interp__buildMatrix :: GExpr repr (Int -> Int -> ((Int,Int) -> R) -> RMatrix)
-
-transpose :: RMatrix -> RMatrix
-transpose (RMatrix m) = RMatrix $ M.transpose m
 
 class ValidExprRepr repr => Interp__transpose repr where
   interp__transpose :: GExpr repr (RMatrix -> RMatrix)

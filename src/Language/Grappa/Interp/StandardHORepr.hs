@@ -19,12 +19,13 @@ import Data.Vector (Vector)
 import qualified Data.Vector as V
 import Control.Monad
 
+import Numeric.LinearAlgebra hiding (R, Uniform, (<>), Vector)
+
 import Language.Grappa.Distribution
 import Language.Grappa.Interp
 import Language.Grappa.GrappaInternals
 import Language.Grappa.Frontend.DataSource
 
-import qualified Data.Matrix as M
 import qualified Numeric.Log as Log
 
 import qualified Numeric.AD.Mode.Reverse as ADR
@@ -53,7 +54,7 @@ type family StandardHOReprF m r i a :: * where
   StandardHOReprF m r i Int     = i
   StandardHOReprF m r i Prob    = Log.Log r
   StandardHOReprF m r i R       = r
-  StandardHOReprF m r i RMatrix = M.Matrix r
+  StandardHOReprF m r i RMatrix = Matrix r
   StandardHOReprF m r i a       = a
 
 instance ValidExprRepr (StandardHORepr m r i) where

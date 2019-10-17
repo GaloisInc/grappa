@@ -124,13 +124,11 @@ library
                      , template-haskell >= 2.12 && < 2.15
                      , hmatrix
                      , hmatrix-gsl
-                     , matrix
                      , array
                      , text
                      , cassava
                      , ad
                      , reflection
-                     , matrix
                      , bytestring
                      , aeson
                      , ansi-wl-pprint

@@ -20,8 +20,6 @@ import qualified Data.Vector.Storable as V
 import qualified Numeric.Log as Log
 import qualified Numeric.SpecFunctions as Gamma
 
-import qualified Data.Matrix as M
-
 import qualified Numeric.AD.Mode.Forward as ADF
 import qualified Numeric.AD.Internal.Forward as ADF
 import qualified Numeric.AD.Mode.Reverse as ADR
@@ -34,8 +32,7 @@ import qualified Data.Reflection as ADR (Reifies)
 type R = Double
 
 -- | The type of real-valued matrices
-newtype RMatrix = RMatrix { unRMatrix :: M.Matrix Double }
-                  deriving (Num,Eq)
+newtype RMatrix = RMatrix { unRMatrix :: Matrix Double } deriving (Num,Eq)
 
 -- | Grappa type for vectors
 -- data Vec a
