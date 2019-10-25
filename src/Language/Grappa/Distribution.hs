@@ -157,12 +157,12 @@ lengthV :: RVector -> Int
 lengthV (RVector v) = V.length v
 
 -- | Return the @i@th element of a 'RVector'
-atV :: RVector -> Int -> Prob
-atV (RVector v) i = Prob $ Log.Exp $ v V.! i
+atV :: RVector -> Int -> Double
+atV (RVector v) i = v V.! i
 
 -- | Generate a probability vector of the given size
-generateV :: Int -> (Int -> Prob) -> RVector
-generateV n f = RVector $ V.generate n (Log.ln . fromProb . f)
+generateV :: Int -> (Int -> Double) -> RVector
+generateV n f = RVector $ V.generate n f
 
 -- | The type of real-valued matrices
 newtype RMatrix = RMatrix { unRMatrix :: Matrix Double } deriving (Num,Eq)
@@ -176,8 +176,8 @@ colsM :: RMatrix -> Int
 colsM (RMatrix m) = M.cols m
 
 -- | Return the @(i,j)@th element of a 'RMatrix'
-atM :: RMatrix -> Int -> Int -> Prob
-atM (RMatrix m) i j = Prob $ Log.Exp $ atIndex m (i,j)
+atM :: RMatrix -> Int -> Int -> Double
+atM (RMatrix m) i j = atIndex m (i,j)
 
 -- | Matrix multiplication
 mulM :: RMatrix -> RMatrix -> RMatrix

@@ -36,6 +36,10 @@ type family ProbFunReprF a where
   ProbFunReprF (Dist a) = ProbFunReprF a -> Prob
   ProbFunReprF (ADT adt) = adt (GExpr ProbFunRepr) (ADT adt)
   ProbFunReprF (Vector a) = Vector (ProbFunReprF a)
+  ProbFunReprF RVector = RVector
+  ProbFunReprF RMatrix = RMatrix
+  ProbFunReprF ProbVector = ProbVector
+  ProbFunReprF ProbMatrix = ProbMatrix
   ProbFunReprF (VIDist a) = (VIDistFamExpr (ProbFunReprF a))
   ProbFunReprF VISize = VIDim
   ProbFunReprF a = a
@@ -392,6 +396,9 @@ instance Interp__adtDist__ListF ProbFunRepr where
       Nil -> probNil * dNil Tuple0
       Cons x xs' -> probCons * dCons (Tuple2 x xs')
 
+instance Interp__arbitrary ProbFunRepr a where
+  interp__arbitrary = GExpr $ \_ -> 1
+
 
 ----------------------------------------------------------------------
 -- Interpreting Vectors
@@ -426,9 +433,89 @@ instance Interp__vec_cons_dist ProbFunRepr a where
     if V.null xs then 0 else
       d (Tuple2 (GExpr $ V.head xs) (GExpr $ V.tail xs))
 
-instance Interp__arbitrary ProbFunRepr a where
-  interp__arbitrary = GExpr $ \_ -> 1
 
+----------------------------------------------------------------------
+-- Interpreting unboxed vectors and matrices
+----------------------------------------------------------------------
+
+instance Interp__lengthV ProbFunRepr where
+  interp__lengthV = GExpr lengthV
+
+instance Interp__atV ProbFunRepr where
+  interp__atV = GExpr atV
+
+instance Interp__generateV ProbFunRepr where
+  interp__generateV = GExpr generateV
+
+instance Interp__rowsM ProbFunRepr where
+  interp__rowsM = GExpr rowsM
+
+instance Interp__colsM ProbFunRepr where
+  interp__colsM = GExpr colsM
+
+instance Interp__atM ProbFunRepr where
+  interp__atM = GExpr atM
+
+instance Interp__mulM ProbFunRepr where
+  interp__mulM = GExpr mulM
+
+instance Interp__mulMV ProbFunRepr where
+  interp__mulMV = GExpr mulMV
+
+instance Interp__mulVM ProbFunRepr where
+  interp__mulVM = GExpr mulVM
+
+
+----------------------------------------------------------------------
+-- Interpreting unboxed vectors and matrices of probabilities
+----------------------------------------------------------------------
+
+instance Interp__lengthPV ProbFunRepr where
+  interp__lengthPV = GExpr lengthPV
+
+instance Interp__atPV ProbFunRepr where
+  interp__atPV = GExpr atPV
+
+instance Interp__generatePV ProbFunRepr where
+  interp__generatePV = GExpr generatePV
+
+instance Interp__sumPV ProbFunRepr where
+  interp__sumPV = GExpr sumPV
+
+instance Interp__rowsPM ProbFunRepr where
+  interp__rowsPM = GExpr rowsPM
+
+instance Interp__colsPM ProbFunRepr where
+  interp__colsPM = GExpr colsPM
+
+instance Interp__atPM ProbFunRepr where
+  interp__atPM = GExpr atPM
+
+instance Interp__mulPM ProbFunRepr where
+  interp__mulPM = GExpr mulPM
+
+instance Interp__mulPMV ProbFunRepr where
+  interp__mulPMV = GExpr mulPMV
+
+instance Interp__mulPVM ProbFunRepr where
+  interp__mulPVM = GExpr mulPVM
+
+
+----------------------------------------------------------------------
+-- Distributions involving unboxed vectors and matrices of probabilities
+----------------------------------------------------------------------
+
+instance Interp__categoricalPV ProbFunRepr where
+  interp__categoricalPV = GExpr $ \probs x ->
+    if x >= lengthPV probs then
+      trace ("Categorical: unexpected value x = " ++ show x) 0
+    else
+      atPV probs x
+
+{-
+instance Interp__mv_normal ProbFunRepr where
+  interp__mvNormal =
+-}
 
 ----------------------------------------------------------------------
 -- Interpreting VI Distribution Families

@@ -724,7 +724,7 @@ class ValidExprRepr repr => Interp__arbitrary repr a where
 
 
 ----------------------------------------------------------------------
--- * Interpreting vectors and matrices
+-- * Interpreting general vectors
 ----------------------------------------------------------------------
 
 class ValidExprRepr repr => Interp__vec_iid repr a where
@@ -750,20 +750,83 @@ class ValidExprRepr repr => Interp__vec_tail repr a where
 class ValidExprRepr repr => Interp__vec_length repr a where
   interp__vec_length :: GExpr repr (Vector a -> Int)
 
-class (ValidExprRepr repr) => Interp__mv_normal repr where
+
+----------------------------------------------------------------------
+-- * Interpreting unboxed vectors and matrices
+----------------------------------------------------------------------
+
+class ValidExprRepr repr => Interp__lengthV repr where
+  interp__lengthV :: GExpr repr (RVector -> Int)
+
+class ValidExprRepr repr => Interp__atV repr where
+  interp__atV :: GExpr repr (RVector -> Int -> R)
+
+class ValidExprRepr repr => Interp__generateV repr where
+  interp__generateV :: GExpr repr (Int -> (Int -> R) -> RVector)
+
+class ValidExprRepr repr => Interp__rowsM repr where
+  interp__rowsM :: GExpr repr (RMatrix -> Int)
+
+class ValidExprRepr repr => Interp__colsM repr where
+  interp__colsM :: GExpr repr (RMatrix -> Int)
+
+class ValidExprRepr repr => Interp__atM repr where
+  interp__atM :: GExpr repr (RMatrix -> Int -> Int -> R)
+
+class ValidExprRepr repr => Interp__mulM repr where
+  interp__mulM :: GExpr repr (RMatrix -> RMatrix -> RMatrix)
+
+class ValidExprRepr repr => Interp__mulMV repr where
+  interp__mulMV :: GExpr repr (RMatrix -> RVector -> RVector)
+
+class ValidExprRepr repr => Interp__mulVM repr where
+  interp__mulVM :: GExpr repr (RVector -> RMatrix -> RVector)
+
+
+----------------------------------------------------------------------
+-- * Interpreting unboxed vectors and matrices of probabilities
+----------------------------------------------------------------------
+
+class ValidExprRepr repr => Interp__lengthPV repr where
+  interp__lengthPV :: GExpr repr (ProbVector -> Int)
+
+class ValidExprRepr repr => Interp__atPV repr where
+  interp__atPV :: GExpr repr (ProbVector -> Int -> Prob)
+
+class ValidExprRepr repr => Interp__generatePV repr where
+  interp__generatePV :: GExpr repr (Int -> (Int -> Prob) -> ProbVector)
+
+class ValidExprRepr repr => Interp__sumPV repr where
+  interp__sumPV :: GExpr repr (ProbVector -> Prob)
+
+class ValidExprRepr repr => Interp__rowsPM repr where
+  interp__rowsPM :: GExpr repr (ProbMatrix -> Int)
+
+class ValidExprRepr repr => Interp__colsPM repr where
+  interp__colsPM :: GExpr repr (ProbMatrix -> Int)
+
+class ValidExprRepr repr => Interp__atPM repr where
+  interp__atPM :: GExpr repr (ProbMatrix -> Int -> Int -> Prob)
+
+class ValidExprRepr repr => Interp__mulPM repr where
+  interp__mulPM :: GExpr repr (ProbMatrix -> ProbMatrix -> ProbMatrix)
+
+class ValidExprRepr repr => Interp__mulPMV repr where
+  interp__mulPMV :: GExpr repr (ProbMatrix -> ProbVector -> ProbVector)
+
+class ValidExprRepr repr => Interp__mulPVM repr where
+  interp__mulPVM :: GExpr repr (ProbVector -> ProbMatrix -> ProbVector)
+
+
+----------------------------------------------------------------------
+-- * Distributions involving unboxed vectors and matrices of probabilities
+----------------------------------------------------------------------
+
+class ValidExprRepr repr => Interp__categoricalPV repr where
+  interp__categoricalPV :: GExpr repr (ProbVector -> Dist Int)
+
+class ValidExprRepr repr => Interp__mv_normal repr where
   interp__mvNormal :: GExpr repr (RMatrix -> RMatrix -> Dist RMatrix)
-
-class ValidExprRepr repr => Interp__matrix repr where
-  interp__matrix :: GExpr repr (GList (GList R) -> RMatrix)
-
-class ValidExprRepr repr => Interp__vector repr where
-  interp__vector :: GExpr repr (GList R -> RMatrix)
-
-class ValidExprRepr repr => Interp__buildMatrix repr where
-  interp__buildMatrix :: GExpr repr (Int -> Int -> ((Int,Int) -> R) -> RMatrix)
-
-class ValidExprRepr repr => Interp__transpose repr where
-  interp__transpose :: GExpr repr (RMatrix -> RMatrix)
 
 
 ----------------------------------------------------------------------
