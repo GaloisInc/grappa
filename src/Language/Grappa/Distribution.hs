@@ -13,9 +13,11 @@ import Control.Monad
 import Control.Monad.Trans
 import GHC.Exts
 import Data.Typeable
-import Numeric.LinearAlgebra hiding (R, Uniform, (<>))
 import qualified Data.Vector.Storable as V
 --import Data.Number.LogFloat hiding (sum, product, log)
+
+import Numeric.LinearAlgebra hiding (R, Uniform, (<>), (<#))
+import qualified Numeric.LinearAlgebra as M
 
 import qualified Numeric.Log as Log
 import qualified Numeric.SpecFunctions as Gamma
@@ -31,11 +33,6 @@ import qualified Data.Reflection as ADR (Reifies)
 -- | The R type alias
 type R = Double
 
--- | The type of real-valued matrices
-newtype RMatrix = RMatrix { unRMatrix :: Matrix Double } deriving (Num,Eq)
-
--- | Grappa type for vectors
--- data Vec a
 
 ----------------------------------------------------------------------
 -- * Supporting the Gamma and Beta Functions
@@ -146,6 +143,115 @@ probToLogR = Log.ln . fromProb
 -- | Lifting the 'Log.sum' method to 'Prob'
 sumProb :: [Prob] -> Prob
 sumProb ps = Prob $ Log.sum $ map fromProb ps
+
+
+----------------------------------------------------------------------
+-- * Matrices of reals and probabilities
+----------------------------------------------------------------------
+
+-- | A bundled up type for unboxed real-valued vectors
+newtype RVector = RVector { unRVector :: Vector Double } deriving (Num,Eq)
+
+-- | Return the length of an 'RVector'
+lengthV :: RVector -> Int
+lengthV (RVector v) = V.length v
+
+-- | Return the @i@th element of a 'RVector'
+atV :: RVector -> Int -> Prob
+atV (RVector v) i = Prob $ Log.Exp $ v V.! i
+
+-- | Generate a probability vector of the given size
+generateV :: Int -> (Int -> Prob) -> RVector
+generateV n f = RVector $ V.generate n (Log.ln . fromProb . f)
+
+-- | The type of real-valued matrices
+newtype RMatrix = RMatrix { unRMatrix :: Matrix Double } deriving (Num,Eq)
+
+-- | Return the number of rows of an 'RMatrix'
+rowsM :: RMatrix -> Int
+rowsM (RMatrix m) = rows m
+
+-- | Return the number of columns of a probability matrix
+colsM :: RMatrix -> Int
+colsM (RMatrix m) = M.cols m
+
+-- | Return the @(i,j)@th element of a 'RMatrix'
+atM :: RMatrix -> Int -> Int -> Prob
+atM (RMatrix m) i j = Prob $ Log.Exp $ atIndex m (i,j)
+
+-- | Matrix multiplication
+mulM :: RMatrix -> RMatrix -> RMatrix
+mulM (RMatrix m1) (RMatrix m2) = RMatrix (m1 M.<> m2)
+
+-- | Matrix-vector multiplication
+mulMV :: RMatrix -> RVector -> RVector
+mulMV (RMatrix m) (RVector v) = RVector (m #> v)
+
+-- | Vector-matrix multiplication
+mulVM :: RVector -> RMatrix -> RVector
+mulVM (RVector v) (RMatrix m) = RVector (v M.<# m)
+
+-- | The type of (efficient storable) vectors of values in log space
+newtype ProbVector = ProbVector { unProbVector :: Vector Double }
+                   deriving (Eq)
+
+-- | Return the length of a 'ProbVector'
+lengthPV :: ProbVector -> Int
+lengthPV (ProbVector v) = V.length v
+
+-- | Return the @i@th element of a 'ProbVector'
+atPV :: ProbVector -> Int -> Prob
+atPV (ProbVector v) i = Prob $ Log.Exp $ v V.! i
+
+-- | Generate a probability vector of the given size
+generatePV :: Int -> (Int -> Prob) -> ProbVector
+generatePV n f = ProbVector $ V.generate n (Log.ln . fromProb . f)
+
+-- | Take the sum of a 'ProbVector'. The algorithm for this is adapted from
+-- 'Log.sum', though that function requires a 'Foldable' instance.
+sumPV :: ProbVector -> Prob
+sumPV (ProbVector v) | V.length v == 0 = Prob $ Log.Exp $ log 0
+sumPV (ProbVector v) =
+  let max_v = V.foldl' max 0 v in
+  Prob $ Log.Exp $
+  if isInfinite max_v then max_v else
+    max_v + Log.log1p (V.foldl' (\r x -> r + Log.expm1 (x - max_v)) 0 v
+                       + fromIntegral (V.length v - 1))
+
+-- | The type of matrices of values in log space
+newtype ProbMatrix = ProbMatrix (Matrix Double) deriving (Eq)
+
+-- | Return the number of rows of a probability matrix
+rowsPM :: ProbMatrix -> Int
+rowsPM (ProbMatrix m) = rows m
+
+-- | Return the number of columns of a probability matrix
+colsPM :: ProbMatrix -> Int
+colsPM (ProbMatrix m) = M.cols m
+
+-- | Return the @(i,j)@th element of a 'ProbMatrix'
+atPM :: ProbMatrix -> Int -> Int -> Prob
+atPM (ProbMatrix m) i j = Prob $ Log.Exp $ atIndex m (i,j)
+
+-- | Matrix-vector multiplication for probability matrices
+mulPMV :: ProbMatrix -> ProbVector -> ProbVector
+mulPMV m v =
+  generatePV (rowsPM m) $ \i ->
+  sumPV $ generatePV (min (colsPM m) (lengthPV v)) $ \j ->
+  (atPM m i j) * (atPV v j)
+
+-- | Vector-matrix multiplication
+mulPVM :: ProbVector -> ProbMatrix -> ProbVector
+mulPVM v m =
+  generatePV (colsPM m) $ \j ->
+  sumPV $ generatePV (min (rowsPM m) (lengthPV v)) $ \i ->
+  (atPM m i j) * (atPV v i)
+
+-- | Matrix-matrix multiplication for probability matrices
+mulPM :: ProbMatrix -> ProbMatrix -> ProbMatrix
+mulPM m1 (ProbMatrix m2) =
+  ProbMatrix $ fromColumns $
+  map (unProbVector . mulPMV m1 . ProbVector) $ toColumns m2
 
 
 ----------------------------------------------------------------------
