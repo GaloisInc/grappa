@@ -37,6 +37,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as V
 import qualified Numeric.LinearAlgebra.Data as SV (Vector)
 import qualified Data.Vector.Generic as SV hiding (Vector)
+import qualified Data.Vector.Generic as SVGen
 import qualified Data.Vector.Storable.Mutable as SMV
 
 import qualified Numeric.AD.Mode.Reverse as ADR
@@ -483,13 +484,13 @@ xformVIDistFam f_to f_from (VIDistFam {..}) =
 
 -- | The distribution family over vectors with a given length whose elements are
 -- drawn IID from the supplied distribution family
-vecIIDVIFam :: VIDim -> VIDistFam a -> VIDistFam (Vector a)
+vecIIDVIFam :: SVGen.Vector f a => VIDim -> VIDistFam a -> VIDistFam (f a)
 vecIIDVIFam len d =
   VIDistFam
   { viDistDim = len * viDistDim d
   , viDistSample =
     do asgn <- ask
-       V.replicateM (evalVIDim len asgn) (viDistSample d)
+       SVGen.replicateM (evalVIDim len asgn) (viDistSample d)
   , viDistEntropy =
     do asgn <- ask
        entropies <- replicateM (evalVIDim len asgn) (viDistEntropy d)
@@ -497,8 +498,8 @@ vecIIDVIFam len d =
   , viDistScaledGradPDF =
     (\scale v ->
       do asgn <- ask
-         if length v == evalVIDim len asgn then
-           forM_ v (viDistScaledGradPDF d scale)
+         if SVGen.length v == evalVIDim len asgn then
+           SVGen.forM_ v (viDistScaledGradPDF d scale)
            else
            error "IID distribution: wrong size vector!")
   , viDistGrowParams =
@@ -716,6 +717,14 @@ vecIIDVIFamExpr len d_expr =
 iidVIFamExpr :: VIDim -> VIDistFamExpr a -> VIDistFamExpr [a]
 iidVIFamExpr len d_expr =
   xformVIDistFamExpr V.toList V.fromList $ vecIIDVIFamExpr len d_expr
+
+-- | The distribution family expression over lists with a given length whose
+-- elements are drawn IID from the supplied distribution family expression
+iidPVVIFamExpr :: VIDim -> VIDistFamExpr Prob -> VIDistFamExpr ProbVector
+iidPVVIFamExpr len d_expr =
+  xformVIDistFamExpr ProbVector unProbVector $
+  VIDistFamExpr (vecIIDVIFam len <$> runVIDistFamExpr
+                 (xformVIDistFamExpr probToLogR logRToProb d_expr))
 
 -- | This distribution family is a delta distribution (i.e., one that always
 -- returns the same value, like 'deltaVIFamExpr') that reads its input from

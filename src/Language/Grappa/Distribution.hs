@@ -233,6 +233,10 @@ colsPM (ProbMatrix m) = M.cols m
 atPM :: ProbMatrix -> Int -> Int -> Prob
 atPM (ProbMatrix m) i j = Prob $ Log.Exp $ atIndex m (i,j)
 
+-- | Build a matrix of probabilities from a list of vectors of probabilities
+fromRowsPM :: [ProbVector] -> ProbMatrix
+fromRowsPM vs = ProbMatrix $ fromRows $ map unProbVector vs
+
 -- | Matrix-vector multiplication for probability matrices
 mulPMV :: ProbMatrix -> ProbVector -> ProbVector
 mulPMV m v =

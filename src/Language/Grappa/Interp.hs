@@ -808,6 +808,9 @@ class ValidExprRepr repr => Interp__colsPM repr where
 class ValidExprRepr repr => Interp__atPM repr where
   interp__atPM :: GExpr repr (ProbMatrix -> Int -> Int -> Prob)
 
+class ValidExprRepr repr => Interp__fromRowsPM repr where
+  interp__fromRowsPM :: GExpr repr (GList ProbVector -> ProbMatrix)
+
 class ValidExprRepr repr => Interp__mulPM repr where
   interp__mulPM :: GExpr repr (ProbMatrix -> ProbMatrix -> ProbMatrix)
 
@@ -926,6 +929,12 @@ class ValidExprRepr repr => Interp__viIID repr a where
 
 class ValidExprRepr repr => Interp__viVecIID repr a where
   interp__viVecIID :: GExpr repr (VISize -> VIDist a -> VIDist (Vector a))
+
+class ValidExprRepr repr => Interp__viIIDPV repr where
+  interp__viIIDPV :: GExpr repr (VISize -> VIDist Prob -> VIDist ProbVector)
+
+class ValidExprRepr repr => Interp__viDirichletPV repr where
+  interp__viDirichletPV :: GExpr repr (VISize -> VIDist ProbVector)
 
 class ValidExprRepr repr => Interp__viJSONInput repr a where
   interp__viJSONInput :: GExpr repr (VIDist a)

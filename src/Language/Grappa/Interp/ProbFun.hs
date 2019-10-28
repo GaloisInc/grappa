@@ -491,6 +491,10 @@ instance Interp__colsPM ProbFunRepr where
 instance Interp__atPM ProbFunRepr where
   interp__atPM = GExpr atPM
 
+instance Interp__fromRowsPM ProbFunRepr where
+  interp__fromRowsPM =
+    GExpr (fromRowsPM . map unGExpr . toHaskellListF unGExpr)
+
 instance Interp__mulPM ProbFunRepr where
   interp__mulPM = GExpr mulPM
 
@@ -598,3 +602,6 @@ instance Interp__viIID ProbFunRepr a where
 
 instance Interp__viVecIID ProbFunRepr a where
   interp__viVecIID = GExpr vecIIDVIFamExpr
+
+instance Interp__viIIDPV ProbFunRepr where
+  interp__viIIDPV = GExpr iidPVVIFamExpr
