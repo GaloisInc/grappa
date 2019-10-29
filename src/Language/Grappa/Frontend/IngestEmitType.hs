@@ -463,10 +463,12 @@ ingestADTName nm =
 
 
 -- | Ingest a normal Haskell constructor as being in a "base type", i.e., in a
--- Haskell type that is somewhat external to Grappa
+-- Haskell type that is somewhat external to Grappa. If the type of the
+-- constructor is too complex to represent in Grappa, return 'Nothing'.
 ingestBaseCtor :: TH.Name -> [TH.TyVarBndr] -> TH.Cxt -> TH.Con ->
-                  Ingest BaseCtor
+                  Ingest (Maybe BaseCtor)
 ingestBaseCtor _tp_nm tyvars ctx ctor_def =
+  flip catchError (const $ return Nothing) $
   withLocalIngestEnv $
   do
     -- Get out the ctor name and arg types
@@ -484,8 +486,8 @@ ingestBaseCtor _tp_nm tyvars ctx ctor_def =
     -- Ingest the constructor argument types
     arg_tps <- mapM ingestType arg_tps_th
     -- Return the results
-    return $ BaseCtor { base_ctor_th_name = ctor_nm,
-                        base_ctor_args = (tvars, constrs, arg_tps) }
+    return $ Just $ BaseCtor { base_ctor_th_name = ctor_nm,
+                               base_ctor_args = (tvars, constrs, arg_tps) }
 
 
 -- | Ingest a TH name as a base type
@@ -498,13 +500,13 @@ ingestBaseTypeName nm = do
          return (TypeNameInfo { tn_th_name = nm,
                                 tn_arity = length tyvars,
                                 tn_ctors = Nothing },
-                 ctors)
+                 catMaybes ctors)
     TH.TyConI (THCompat.NewtypeD ctx _ tyvars th_ctor) ->
       do ctor <- ingestBaseCtor nm tyvars ctx th_ctor
          return (TypeNameInfo { tn_th_name = nm,
                                 tn_arity = length tyvars,
                                 tn_ctors = Nothing },
-                 [ctor])
+                 catMaybes [ctor])
     TH.PrimTyConI _ arity _ ->
       return (TypeNameInfo { tn_th_name = nm,
                              tn_arity = arity,
