@@ -359,6 +359,10 @@ instance Interp__dirichletProb ProbFunRepr where
   interp__dirichletProb = GExpr $ \alphas xs ->
     Prob $ dirichletDensityLog (toList alphas) (map fromProb $ toList xs)
 
+instance Interp__dirichletPV ProbFunRepr where
+  interp__dirichletPV = GExpr $ \alphas xs ->
+    dirichletDensityPV alphas xs
+
 instance Interp__categorical ProbFunRepr where
   interp__categorical = GExpr $ \probs x ->
     if x >= length (toList probs) then
@@ -494,6 +498,10 @@ instance Interp__atPM ProbFunRepr where
 instance Interp__fromRowsPM ProbFunRepr where
   interp__fromRowsPM =
     GExpr (fromRowsPM . map unGExpr . toHaskellListF unGExpr)
+
+instance Interp__fromColsPM ProbFunRepr where
+  interp__fromColsPM =
+    GExpr (fromColsPM . map unGExpr . toHaskellListF unGExpr)
 
 instance Interp__mulPM ProbFunRepr where
   interp__mulPM = GExpr mulPM

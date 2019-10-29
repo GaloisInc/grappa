@@ -233,9 +233,13 @@ colsPM (ProbMatrix m) = M.cols m
 atPM :: ProbMatrix -> Int -> Int -> Prob
 atPM (ProbMatrix m) i j = Prob $ Log.Exp $ atIndex m (i,j)
 
--- | Build a matrix of probabilities from a list of vectors of probabilities
+-- | Build a matrix of probabilities from a list of its rows
 fromRowsPM :: [ProbVector] -> ProbMatrix
 fromRowsPM vs = ProbMatrix $ fromRows $ map unProbVector vs
+
+-- | Build a matrix of probabilities from a list of its columns
+fromColsPM :: [ProbVector] -> ProbMatrix
+fromColsPM vs = ProbMatrix $ fromColumns $ map unProbVector vs
 
 -- | Matrix-vector multiplication for probability matrices
 mulPMV :: ProbMatrix -> ProbVector -> ProbVector
@@ -821,6 +825,20 @@ dirichletDensityLog alphas xs =
   Log.Exp $
   sum (zipWith (\alpha x -> (alpha - 1) * Log.ln x) alphas xs) -
   Log.ln (logMVBeta alphas)
+
+-- | The log of the multivariate beta function
+logMVBetaV :: RVector -> Log.Log Double
+logMVBetaV (RVector alphas) =
+  -- Gamma (a_1) * ... * Gamma (a_n) / Gamma (a_1 + ... + a_n) in log space
+  Log.Exp $ V.foldl' (\r alpha -> r + logGamma alpha) 0 alphas
+
+-- | Calculate the density of the Dirichlet distribution over a 'ProbVector'
+dirichletDensityPV :: RVector -> ProbVector -> Prob
+dirichletDensityPV (RVector alphas) (ProbVector xs) =
+  -- x_1 ** (alpha_1 - 1) * ... * x_n ** (alpha_n - 1) / Beta (alphas)
+  Prob $ Log.Exp $
+  V.ifoldl' (\r i alpha -> r + (alpha - 1) * xs!i) 0 alphas -
+  Log.ln (logMVBetaV $ RVector alphas)
 
 instance PDFDist Dirichlet where
   distDensity (Dirichlet alphas) xs = Prob $ dirichletDensity alphas xs

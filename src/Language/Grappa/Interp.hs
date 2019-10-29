@@ -690,6 +690,9 @@ class ValidExprRepr repr => Interp__dirichlet repr where
 class ValidExprRepr repr => Interp__dirichletProb repr where
   interp__dirichletProb :: GExpr repr (GList R -> Dist (GList Prob))
 
+class ValidExprRepr repr => Interp__dirichletPV repr where
+  interp__dirichletPV :: GExpr repr (RVector -> Dist ProbVector)
+
 class ValidExprRepr repr => Interp__categorical repr where
   interp__categorical :: GExpr repr (GList Prob -> Dist Int)
 
@@ -810,6 +813,9 @@ class ValidExprRepr repr => Interp__atPM repr where
 
 class ValidExprRepr repr => Interp__fromRowsPM repr where
   interp__fromRowsPM :: GExpr repr (GList ProbVector -> ProbMatrix)
+
+class ValidExprRepr repr => Interp__fromColsPM repr where
+  interp__fromColsPM :: GExpr repr (GList ProbVector -> ProbMatrix)
 
 class ValidExprRepr repr => Interp__mulPM repr where
   interp__mulPM :: GExpr repr (ProbMatrix -> ProbMatrix -> ProbMatrix)
