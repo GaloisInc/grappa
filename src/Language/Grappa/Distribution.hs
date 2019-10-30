@@ -164,6 +164,14 @@ atV (RVector v) i = v V.! i
 generateV :: Int -> (Int -> Double) -> RVector
 generateV n f = RVector $ V.generate n f
 
+-- | Generate a vector from a list of its elements
+fromListV :: [Double] -> RVector
+fromListV = RVector . V.fromList
+
+-- | Extract the elements of a vector as a list
+toListV :: RVector -> [Double]
+toListV = V.toList . unRVector
+
 -- | The type of real-valued matrices
 newtype RMatrix = RMatrix { unRMatrix :: Matrix Double } deriving (Num,Eq)
 
@@ -222,6 +230,14 @@ atPV (ProbVector v) i = Prob $ Log.Exp $ v V.! i
 -- | Generate a probability vector of the given size
 generatePV :: Int -> (Int -> Prob) -> ProbVector
 generatePV n f = ProbVector $ V.generate n (Log.ln . fromProb . f)
+
+-- | Generate a probability vector from a list of its elements
+fromListPV :: [Prob] -> ProbVector
+fromListPV = ProbVector . V.fromList . map probToLogR
+
+-- | Extract the elements of a probability vector as a list
+toListPV :: ProbVector -> [Prob]
+toListPV = map logRToProb . V.toList . unProbVector
 
 -- | Take the sum of a 'ProbVector'. The algorithm for this is adapted from
 -- 'Log.sum', though that function requires a 'Foldable' instance.

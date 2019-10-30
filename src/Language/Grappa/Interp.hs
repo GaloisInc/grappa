@@ -930,6 +930,9 @@ class ValidExprRepr repr => Interp__viDirichlet repr where
 class ValidExprRepr repr => Interp__viDirichletProb repr where
   interp__viDirichletProb :: GExpr repr (VISize -> VIDist (GList Prob))
 
+class ValidExprRepr repr => Interp__viDirichletPV repr where
+  interp__viDirichletPV :: GExpr repr (VISize -> VIDist ProbVector)
+
 class ValidExprRepr repr => Interp__viTuple0 repr where
   interp__viTuple0 :: GExpr repr (VIDist (GTuple '[]))
 
@@ -956,9 +959,6 @@ class ValidExprRepr repr => Interp__viVecIID repr a where
 
 class ValidExprRepr repr => Interp__viIIDPV repr where
   interp__viIIDPV :: GExpr repr (VISize -> VIDist Prob -> VIDist ProbVector)
-
-class ValidExprRepr repr => Interp__viDirichletPV repr where
-  interp__viDirichletPV :: GExpr repr (VISize -> VIDist ProbVector)
 
 class ValidExprRepr repr => Interp__viJSONInput repr a where
   interp__viJSONInput :: GExpr repr (VIDist a)

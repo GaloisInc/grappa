@@ -16,6 +16,7 @@ module Language.Grappa.Interp.ProbFun where
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import qualified Numeric.Log as Log
+import qualified Numeric.LinearAlgebra as M
 import Data.Functor.Compose
 import Data.Aeson
 
@@ -574,6 +575,12 @@ instance Interp__viDirichletProb ProbFunRepr where
   interp__viDirichletProb =
     GExpr $ \sz ->
     xformVIDistFamExpr fromList toList (dirichletProbVIFamExpr sz)
+
+instance Interp__viDirichletPV ProbFunRepr where
+  interp__viDirichletPV =
+    GExpr $ \sz ->
+    xformVIDistFamExpr (fromListPV . fromList) (toList . toListPV)
+    (dirichletProbVIFamExpr sz)
 
 instance (Eq (ProbFunReprF a), Show (ProbFunReprF a)) =>
          Interp__viDelta ProbFunRepr a where

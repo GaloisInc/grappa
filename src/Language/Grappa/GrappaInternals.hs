@@ -160,6 +160,16 @@ instance GrappaType R where
 instance GrappaType Prob where
   grappaTypeRepr = GrappaBaseType GrappaTypeAppBase
 
+-- Instances for real and probability vectors and matrices
+instance GrappaType RVector where
+  grappaTypeRepr = GrappaBaseType GrappaTypeAppBase
+instance GrappaType RMatrix where
+  grappaTypeRepr = GrappaBaseType GrappaTypeAppBase
+instance GrappaType ProbVector where
+  grappaTypeRepr = GrappaBaseType GrappaTypeAppBase
+instance GrappaType ProbMatrix where
+  grappaTypeRepr = GrappaBaseType GrappaTypeAppBase
+
 -- | Test if a 'GrappaTypeRepr' is equal to 'R'
 matchGrappaRType :: GrappaTypeRepr a -> Maybe (a :~: R)
 matchGrappaRType (GrappaBaseType GrappaTypeAppBase) = eqT
@@ -735,7 +745,7 @@ instance GrappaShow RMatrix where
 
 instance GrappaShow ProbMatrix where
   grappaShow m =
-    "[R|" ++ concat (intersperse "\n" $ map grappaShow (toRowsPM m)) ++ "|]"
+    "[P|" ++ concat (intersperse "\n" $ map grappaShow (toRowsPM m)) ++ "|]"
 
 instance MapC GrappaShow (MapF f ts) => GrappaShow (TupleF ts f r) where
   grappaShow Tuple0 = "()"
