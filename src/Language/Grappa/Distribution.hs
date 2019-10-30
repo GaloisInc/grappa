@@ -179,6 +179,22 @@ colsM (RMatrix m) = M.cols m
 atM :: RMatrix -> Int -> Int -> Double
 atM (RMatrix m) i j = atIndex m (i,j)
 
+-- | Build a matrix from a list of its rows
+fromRowsM :: [RVector] -> RMatrix
+fromRowsM vs = RMatrix $ fromRows $ map unRVector vs
+
+-- | Build a matrix of probabilities from a list of its columns
+fromColsM :: [RVector] -> RMatrix
+fromColsM vs = RMatrix $ fromColumns $ map unRVector vs
+
+-- | Get the rows of a matrix as a list of vectors
+toRowsM :: RMatrix -> [RVector]
+toRowsM (RMatrix m) = map RVector $ toRows m
+
+-- | Get the columns of a matrix as a list of vectors
+toColsM :: RMatrix -> [RVector]
+toColsM (RMatrix m) = map RVector $ toColumns m
+
 -- | Matrix multiplication
 mulM :: RMatrix -> RMatrix -> RMatrix
 mulM (RMatrix m1) (RMatrix m2) = RMatrix (m1 M.<> m2)
@@ -240,6 +256,14 @@ fromRowsPM vs = ProbMatrix $ fromRows $ map unProbVector vs
 -- | Build a matrix of probabilities from a list of its columns
 fromColsPM :: [ProbVector] -> ProbMatrix
 fromColsPM vs = ProbMatrix $ fromColumns $ map unProbVector vs
+
+-- | Get the rows of a matrix as a list of vectors
+toRowsPM :: ProbMatrix -> [ProbVector]
+toRowsPM (ProbMatrix m) = map ProbVector $ toRows m
+
+-- | Get the columns of a matrix as a list of vectors
+toColsPM :: ProbMatrix -> [ProbVector]
+toColsPM (ProbMatrix m) = map ProbVector $ toColumns m
 
 -- | Matrix-vector multiplication for probability matrices
 mulPMV :: ProbMatrix -> ProbVector -> ProbVector

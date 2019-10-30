@@ -503,6 +503,14 @@ instance Interp__fromColsPM ProbFunRepr where
   interp__fromColsPM =
     GExpr (fromColsPM . map unGExpr . toHaskellListF unGExpr)
 
+instance Interp__toRowsPM ProbFunRepr where
+  interp__toRowsPM =
+    GExpr (fromHaskellListF GExpr . map GExpr . toRowsPM)
+
+instance Interp__toColsPM ProbFunRepr where
+  interp__toColsPM =
+    GExpr (fromHaskellListF GExpr . map GExpr . toColsPM)
+
 instance Interp__mulPM ProbFunRepr where
   interp__mulPM = GExpr mulPM
 

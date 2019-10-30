@@ -776,6 +776,18 @@ class ValidExprRepr repr => Interp__colsM repr where
 class ValidExprRepr repr => Interp__atM repr where
   interp__atM :: GExpr repr (RMatrix -> Int -> Int -> R)
 
+class ValidExprRepr repr => Interp__fromRowsM repr where
+  interp__fromRowsM :: GExpr repr (GList RVector -> RMatrix)
+
+class ValidExprRepr repr => Interp__fromColsM repr where
+  interp__fromColsM :: GExpr repr (GList RVector -> RMatrix)
+
+class ValidExprRepr repr => Interp__toRowsM repr where
+  interp__toRowsM :: GExpr repr (RMatrix -> GList RVector)
+
+class ValidExprRepr repr => Interp__toColsM repr where
+  interp__toColsM :: GExpr repr (RMatrix -> GList RVector)
+
 class ValidExprRepr repr => Interp__mulM repr where
   interp__mulM :: GExpr repr (RMatrix -> RMatrix -> RMatrix)
 
@@ -816,6 +828,12 @@ class ValidExprRepr repr => Interp__fromRowsPM repr where
 
 class ValidExprRepr repr => Interp__fromColsPM repr where
   interp__fromColsPM :: GExpr repr (GList ProbVector -> ProbMatrix)
+
+class ValidExprRepr repr => Interp__toRowsPM repr where
+  interp__toRowsPM :: GExpr repr (ProbMatrix -> GList ProbVector)
+
+class ValidExprRepr repr => Interp__toColsPM repr where
+  interp__toColsPM :: GExpr repr (ProbMatrix -> GList ProbVector)
 
 class ValidExprRepr repr => Interp__mulPM repr where
   interp__mulPM :: GExpr repr (ProbMatrix -> ProbMatrix -> ProbMatrix)

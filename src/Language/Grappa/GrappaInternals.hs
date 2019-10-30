@@ -18,6 +18,7 @@ import Data.Aeson
 import Data.Aeson.Types (Parser)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
+import qualified Numeric.LinearAlgebra as M
 
 import Language.Grappa.Distribution
 
@@ -718,6 +719,23 @@ instance GrappaShow (adt Id (ADT adt)) => GrappaShow (ADT adt) where
 instance GrappaShow a => GrappaShow (Vector a) where
   grappaShow xs =
     "[|" ++ concat (intersperse ", " (map grappaShow $ V.toList xs)) ++ "|]"
+
+instance GrappaShow RVector where
+  grappaShow (RVector xs) =
+    "[|" ++ concat (intersperse ", " (map grappaShow $ M.toList xs)) ++ "|]"
+
+instance GrappaShow ProbVector where
+  grappaShow (ProbVector xs) =
+    "[|" ++ concat (intersperse ", "
+                    (map (grappaShow . logRToProb) $ M.toList xs)) ++ "|]"
+
+instance GrappaShow RMatrix where
+  grappaShow m =
+    "[R|" ++ concat (intersperse "\n" $ map grappaShow (toRowsM m)) ++ "|]"
+
+instance GrappaShow ProbMatrix where
+  grappaShow m =
+    "[R|" ++ concat (intersperse "\n" $ map grappaShow (toRowsPM m)) ++ "|]"
 
 instance MapC GrappaShow (MapF f ts) => GrappaShow (TupleF ts f r) where
   grappaShow Tuple0 = "()"
