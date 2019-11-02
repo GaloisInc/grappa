@@ -164,6 +164,10 @@ atV (RVector v) i = v V.! i
 generateV :: Int -> (Int -> Double) -> RVector
 generateV n f = RVector $ V.generate n f
 
+-- | Take the sum of an 'RVector'
+sumV :: RVector -> Double
+sumV (RVector v) = V.foldl' (+) 0 v
+
 -- | Generate a vector from a list of its elements
 fromListV :: [Double] -> RVector
 fromListV = RVector . V.fromList
@@ -871,6 +875,14 @@ logMVBetaV :: RVector -> Log.Log Double
 logMVBetaV (RVector alphas) =
   -- Gamma (a_1) * ... * Gamma (a_n) / Gamma (a_1 + ... + a_n) in log space
   Log.Exp $ V.foldl' (\r alpha -> r + logGamma alpha) 0 alphas
+
+-- | Calculate the density of the Dirichlet distribution over an 'RVector'
+dirichletDensityV :: RVector -> RVector -> Prob
+dirichletDensityV (RVector alphas) (RVector xs) =
+  -- x_1 ** (alpha_1 - 1) * ... * x_n ** (alpha_n - 1) / Beta (alphas)
+  Prob $ Log.Exp $
+  V.ifoldl' (\r i alpha -> r + (alpha - 1) * log (xs!i)) 0 alphas -
+  Log.ln (logMVBetaV $ RVector alphas)
 
 -- | Calculate the density of the Dirichlet distribution over a 'ProbVector'
 dirichletDensityPV :: RVector -> ProbVector -> Prob

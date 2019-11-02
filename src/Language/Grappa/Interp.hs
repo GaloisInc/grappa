@@ -690,6 +690,9 @@ class ValidExprRepr repr => Interp__dirichlet repr where
 class ValidExprRepr repr => Interp__dirichletProb repr where
   interp__dirichletProb :: GExpr repr (GList R -> Dist (GList Prob))
 
+class ValidExprRepr repr => Interp__dirichletV repr where
+  interp__dirichletV :: GExpr repr (RVector -> Dist RVector)
+
 class ValidExprRepr repr => Interp__dirichletPV repr where
   interp__dirichletPV :: GExpr repr (RVector -> Dist ProbVector)
 
@@ -701,6 +704,9 @@ class ValidExprRepr repr => Interp__poisson repr where
 
 class ValidExprRepr repr => Interp__binary_mixture repr a where
   interp__binary_mixture :: GExpr repr (Prob -> Dist a -> Dist a -> Dist a)
+
+class ValidExprRepr repr => Interp__scaleDist repr a where
+  interp__scaleDist :: GExpr repr (Prob -> Dist a -> Dist a)
 
 class ValidExprRepr repr => Interp__ctorDist__ListF repr where
   interp__ctorDist__Nil ::
@@ -763,6 +769,9 @@ class ValidExprRepr repr => Interp__lengthV repr where
 
 class ValidExprRepr repr => Interp__atV repr where
   interp__atV :: GExpr repr (RVector -> Int -> R)
+
+class ValidExprRepr repr => Interp__sumV repr where
+  interp__sumV :: GExpr repr (RVector -> R)
 
 class ValidExprRepr repr => Interp__generateV repr where
   interp__generateV :: GExpr repr (Int -> (Int -> R) -> RVector)
@@ -849,6 +858,9 @@ class ValidExprRepr repr => Interp__mulPVM repr where
 -- * Distributions involving unboxed vectors and matrices of probabilities
 ----------------------------------------------------------------------
 
+class ValidExprRepr repr => Interp__categoricalV repr where
+  interp__categoricalV :: GExpr repr (RVector -> Dist Int)
+
 class ValidExprRepr repr => Interp__categoricalPV repr where
   interp__categoricalPV :: GExpr repr (ProbVector -> Dist Int)
 
@@ -929,6 +941,9 @@ class ValidExprRepr repr => Interp__viDirichlet repr where
 
 class ValidExprRepr repr => Interp__viDirichletProb repr where
   interp__viDirichletProb :: GExpr repr (VISize -> VIDist (GList Prob))
+
+class ValidExprRepr repr => Interp__viDirichletV repr where
+  interp__viDirichletV :: GExpr repr (VISize -> VIDist RVector)
 
 class ValidExprRepr repr => Interp__viDirichletPV repr where
   interp__viDirichletPV :: GExpr repr (VISize -> VIDist ProbVector)

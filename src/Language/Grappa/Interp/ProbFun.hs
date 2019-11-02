@@ -360,6 +360,10 @@ instance Interp__dirichletProb ProbFunRepr where
   interp__dirichletProb = GExpr $ \alphas xs ->
     Prob $ dirichletDensityLog (toList alphas) (map fromProb $ toList xs)
 
+instance Interp__dirichletV ProbFunRepr where
+  interp__dirichletV = GExpr $ \alphas xs ->
+    dirichletDensityV alphas xs
+
 instance Interp__dirichletPV ProbFunRepr where
   interp__dirichletPV = GExpr $ \alphas xs ->
     dirichletDensityPV alphas xs
@@ -384,6 +388,9 @@ instance Interp__poisson ProbFunRepr where
 instance Interp__binary_mixture ProbFunRepr a where
   interp__binary_mixture = GExpr $ \p d1 d2 x ->
     p * d1 x + (1 - p) * d2 x
+
+instance Interp__scaleDist ProbFunRepr a where
+  interp__scaleDist = GExpr $ \p d x -> p * d x
 
 instance Interp__ctorDist__ListF ProbFunRepr where
   interp__ctorDist__Nil = GExpr $ \d xs ->
@@ -452,6 +459,9 @@ instance Interp__atV ProbFunRepr where
 instance Interp__generateV ProbFunRepr where
   interp__generateV = GExpr generateV
 
+instance Interp__sumV ProbFunRepr where
+  interp__sumV = GExpr sumV
+
 instance Interp__rowsM ProbFunRepr where
   interp__rowsM = GExpr rowsM
 
@@ -460,6 +470,14 @@ instance Interp__colsM ProbFunRepr where
 
 instance Interp__atM ProbFunRepr where
   interp__atM = GExpr atM
+
+instance Interp__fromRowsM ProbFunRepr where
+  interp__fromRowsM =
+    GExpr (fromRowsM . map unGExpr . toHaskellListF unGExpr)
+
+instance Interp__fromColsM ProbFunRepr where
+  interp__fromColsM =
+    GExpr (fromColsM . map unGExpr . toHaskellListF unGExpr)
 
 instance Interp__mulM ProbFunRepr where
   interp__mulM = GExpr mulM
@@ -533,6 +551,13 @@ instance Interp__categoricalPV ProbFunRepr where
     else
       atPV probs x
 
+instance Interp__categoricalV ProbFunRepr where
+  interp__categoricalV = GExpr $ \probs x ->
+    if x >= lengthV probs then
+      trace ("Categorical: unexpected value x = " ++ show x) 0
+    else
+      realToProb (atV probs x)
+
 {-
 instance Interp__mv_normal ProbFunRepr where
   interp__mvNormal =
@@ -575,6 +600,12 @@ instance Interp__viDirichletProb ProbFunRepr where
   interp__viDirichletProb =
     GExpr $ \sz ->
     xformVIDistFamExpr fromList toList (dirichletProbVIFamExpr sz)
+
+instance Interp__viDirichletV ProbFunRepr where
+  interp__viDirichletV =
+    GExpr $ \sz ->
+    xformVIDistFamExpr (fromListV . fromList) (toList . toListV)
+    (dirichletVIFamExpr sz)
 
 instance Interp__viDirichletPV ProbFunRepr where
   interp__viDirichletPV =
