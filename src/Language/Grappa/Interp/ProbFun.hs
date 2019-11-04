@@ -195,6 +195,26 @@ instance (Interp__'integer ProbFunRepr a,
   interp__'eqInteger (GExpr x) (GExpr y) = GExpr (x == y)
 
 
+instance (Integral a, Integral (ProbFunReprF a)) =>
+         Interp__quot ProbFunRepr a where
+  interp__quot = GExpr quot
+
+instance (Integral a, Integral (ProbFunReprF a)) =>
+         Interp__rem ProbFunRepr a where
+  interp__rem = GExpr rem
+
+instance (Integral a, Integral (ProbFunReprF a)) =>
+         Interp__div ProbFunRepr a where
+  interp__div = GExpr div
+
+instance (Integral a, Integral (ProbFunReprF a)) =>
+         Interp__mod ProbFunRepr a where
+  interp__mod = GExpr mod
+
+instance (Integral a, Integral (ProbFunReprF a)) =>
+         Interp__toInteger ProbFunRepr a where
+  interp__toInteger = GExpr toInteger
+
 instance (Fractional a, Fractional (ProbFunReprF a)) =>
          Interp__'div ProbFunRepr a where
   interp__'div = GExpr (/)
@@ -424,6 +444,9 @@ instance Interp__vec_tail ProbFunRepr a where
 
 instance Interp__vec_length ProbFunRepr a where
   interp__vec_length = GExpr V.length
+
+instance Interp__vec_map ProbFunRepr a b where
+  interp__vec_map = GExpr V.map
 
 instance Interp__vec_iid ProbFunRepr a where
   interp__vec_iid = GExpr $ \n d xs ->

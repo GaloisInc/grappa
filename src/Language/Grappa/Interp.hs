@@ -488,6 +488,20 @@ class (Num a, ValidExprRepr repr) => Interp__'integer repr a where
 class (Interp__'integer repr a) => Interp__'eqInteger repr a where
   interp__'eqInteger :: GExpr repr a -> GExpr repr a -> GExpr repr Bool
 
+class (Integral a, ValidExprRepr repr) => Interp__quot repr a where
+  interp__quot :: GExpr repr (a -> a -> a)
+
+class (Integral a, ValidExprRepr repr) => Interp__rem repr a where
+  interp__rem :: GExpr repr (a -> a -> a)
+
+class (Integral a, ValidExprRepr repr) => Interp__div repr a where
+  interp__div :: GExpr repr (a -> a -> a)
+
+class (Integral a, ValidExprRepr repr) => Interp__mod repr a where
+  interp__mod :: GExpr repr (a -> a -> a)
+
+class (Integral a, ValidExprRepr repr) => Interp__toInteger repr a where
+  interp__toInteger :: GExpr repr (a -> Integer)
 
 class (Fractional a, ValidExprRepr repr) => Interp__'div repr a where
   interp__'div :: GExpr repr (a -> a -> a)
@@ -758,6 +772,9 @@ class ValidExprRepr repr => Interp__vec_tail repr a where
 
 class ValidExprRepr repr => Interp__vec_length repr a where
   interp__vec_length :: GExpr repr (Vector a -> Int)
+
+class ValidExprRepr repr => Interp__vec_map repr a b where
+  interp__vec_map :: GExpr repr ((a -> b) -> Vector a -> Vector b)
 
 
 ----------------------------------------------------------------------
