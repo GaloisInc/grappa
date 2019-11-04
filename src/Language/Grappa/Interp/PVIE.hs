@@ -7,7 +7,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE DeriveGeneric #-}
 
 module Language.Grappa.Interp.PVIE where
@@ -23,9 +22,6 @@ import Control.Monad.Reader
 import Control.Monad.Primitive
 import Data.IORef
 import qualified Numeric.Log as Log
-
-import Foreign.Ptr
-import Foreign.ForeignPtr
 
 import qualified Data.ByteString.Lazy as BS
 import Data.Aeson
@@ -48,7 +44,6 @@ import Numeric.GSL.Minimization
 
 import Language.Grappa.Distribution
 import Language.Grappa.GrappaInternals
-import Language.Grappa.Interp
 
 import Language.Grappa.Rand.MWCRandM
 import qualified System.Random.MWC as MWC
@@ -58,7 +53,6 @@ import qualified Text.PrettyPrint.ANSI.Leijen as PP
 import Text.PrettyPrint.ANSI.Leijen ((<+>), (<>))
 
 import Options.Applicative
-import Data.Semigroup ((<>))
 
 import Debug.Trace
 
@@ -482,6 +476,26 @@ xformVIDistFam f_to f_from (VIDistFam {..}) =
     ..
   }
 
+-- | Map a vector of distribution families to a distribution family of vectors
+vecDistVIFam :: (SVGen.Vector f a, SVGen.Vector f (VIDistFam a)) =>
+                f (VIDistFam a) -> VIDistFam (f a)
+vecDistVIFam ds =
+  VIDistFam
+  { viDistDim = SVGen.foldl' (\dim d -> dim + viDistDim d) 0 ds
+  , viDistSample = SVGen.mapM viDistSample ds
+  , viDistEntropy = SVGen.foldM' (\e d -> (e +) <$> viDistEntropy d) 0 ds
+  , viDistScaledGradPDF =
+    (\scale v ->
+      if SVGen.length v == SVGen.length ds then
+        SVGen.zipWithM_ (\d x -> viDistScaledGradPDF d scale x) ds v
+      else
+        error "vecDist distribution: wrong size vector!")
+  , viDistGrowParams = SVGen.mapM_ viDistGrowParams ds
+  , viDistPP =
+    do pps <- mapM viDistPP $ SVGen.toList ds
+       return (PP.text "vecDist" <+> PP.list pps)
+  }
+
 -- | The distribution family over vectors with a given length whose elements are
 -- drawn IID from the supplied distribution family
 vecIIDVIFam :: SVGen.Vector f a => VIDim -> VIDistFam a -> VIDistFam (f a)
@@ -711,6 +725,14 @@ xformVIDistFamExpr f_to f_from expr =
 vecIIDVIFamExpr :: VIDim -> VIDistFamExpr a -> VIDistFamExpr (Vector a)
 vecIIDVIFamExpr len d_expr =
   VIDistFamExpr (vecIIDVIFam len <$> runVIDistFamExpr d_expr)
+
+-- | Map a vector of distribution family expressions to a distribution family
+-- expression over vectors
+vecDistVIFamExpr :: (SVGen.Vector f a, SVGen.Vector f (VIDistFam a),
+                     SVGen.Vector f (VIDistFamExpr a)) =>
+                    f (VIDistFamExpr a) -> VIDistFamExpr (f a)
+vecDistVIFamExpr d_exprs =
+  VIDistFamExpr (vecDistVIFam <$> SVGen.mapM runVIDistFamExpr d_exprs)
 
 -- | The distribution family expression over lists with a given length whose
 -- elements are drawn IID from the supplied distribution family expression

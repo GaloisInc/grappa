@@ -682,6 +682,9 @@ instance Interp__viIID ProbFunRepr a where
     GExpr $ \sz d ->
     xformVIDistFamExpr fromList toList (iidVIFamExpr sz d)
 
+instance Interp__viVecDist ProbFunRepr a where
+  interp__viVecDist = GExpr vecDistVIFamExpr
+
 instance Interp__viVecIID ProbFunRepr a where
   interp__viVecIID = GExpr vecIIDVIFamExpr
 
