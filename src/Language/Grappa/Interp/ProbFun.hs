@@ -613,13 +613,18 @@ instance Interp__viDirichletPV ProbFunRepr where
     xformVIDistFamExpr (fromListPV . fromList) (toList . toListPV)
     (dirichletProbVIFamExpr sz)
 
-instance (Eq (ProbFunReprF a), Show (ProbFunReprF a)) =>
+instance (Eq (ProbFunReprF a), GrappaShow (ProbFunReprF a)) =>
          Interp__viDelta ProbFunRepr a where
   interp__viDelta = GExpr deltaVIFamExpr
 
-instance (Eq (ProbFunReprF a), FromJSON (ProbFunReprF a)) =>
+instance (Eq (ProbFunReprF a), GrappaShow (ProbFunReprF a),
+          FromJSON (ProbFunReprF a)) =>
          Interp__viJSONInput ProbFunRepr a where
   interp__viJSONInput = GExpr readJSONVIDistFamExpr
+
+instance FromJSON (ProbFunReprF a) =>
+         Interp__viMappedJSONInput ProbFunRepr a b where
+  interp__viMappedJSONInput = GExpr mapJSONVIDistFamExpr
 
 instance Interp__viTuple0 ProbFunRepr where
   interp__viTuple0 = GExpr $ tupleVIFamExpr Tuple0

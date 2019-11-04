@@ -544,9 +544,9 @@ simpleVIFamExpr nm dim sampleFun entropyFun pdfFun =
 
 -- | The constant distribution (also known as the delta distribution), that
 -- returns a single value with unit probability
-deltaVIFamExpr :: (Eq a, Show a) => a -> VIDistFamExpr a
+deltaVIFamExpr :: (Eq a, GrappaShow a) => a -> VIDistFamExpr a
 deltaVIFamExpr a =
-  simpleVIFamExpr ("Delta(" ++ show a ++ ")")
+  simpleVIFamExpr ("Delta(" ++ grappaShow a ++ ")")
   0 (\_ -> return a) (\_ -> 0)
   (\x _ -> if x == a then 0 else log 0)
 
@@ -726,23 +726,26 @@ iidPVVIFamExpr len d_expr =
   VIDistFamExpr (vecIIDVIFam len <$> runVIDistFamExpr
                  (xformVIDistFamExpr probToLogR logRToProb d_expr))
 
--- | This distribution family is a delta distribution (i.e., one that always
--- returns the same value, like 'deltaVIFamExpr') that reads its input from
--- stdin as a JSON file
-readJSONVIDistFamExpr :: (Eq a, FromJSON a) => VIDistFamExpr a
-readJSONVIDistFamExpr =
+-- | This distribution family reads an input of type @a@ from @stdin@ as a JSON
+-- file and then passes that input to the supplied function to build a
+-- distribution family of type @b@
+mapJSONVIDistFamExpr :: FromJSON a => (a -> VIDistFamExpr b) -> VIDistFamExpr b
+mapJSONVIDistFamExpr f =
   VIDistFamExpr $
   do (v,files) <- get
      let (file, files') =
            if length files == 0 then
-             error "readJSONVIDistFamExpr: not enough data files specified"
+             error "mapJSONVIDistFamExpr: not enough data files specified"
            else (head files, tail files)
      put (v, files')
      a <- liftIO $ readJSONfile file
-     return $
-       simpleVIFam ("JSONData")
-       0 (\_ -> return a) (\_ -> 0)
-       (\x _ -> if x == a then 0 else log 0)
+     runVIDistFamExpr $ f a
+
+-- | This distribution family is a delta distribution (i.e., one that always
+-- returns the same value, like 'deltaVIFamExpr') that reads its input from
+-- stdin as a JSON file
+readJSONVIDistFamExpr :: (Eq a, GrappaShow a, FromJSON a) => VIDistFamExpr a
+readJSONVIDistFamExpr = mapJSONVIDistFamExpr deltaVIFamExpr
 
 
 ----------------------------------------------------------------------

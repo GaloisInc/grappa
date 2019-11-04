@@ -978,6 +978,9 @@ class ValidExprRepr repr => Interp__viIIDPV repr where
 class ValidExprRepr repr => Interp__viJSONInput repr a where
   interp__viJSONInput :: GExpr repr (VIDist a)
 
+class ValidExprRepr repr => Interp__viMappedJSONInput repr a b where
+  interp__viMappedJSONInput :: GExpr repr ((a -> VIDist b) -> VIDist b)
+
 
 ----------------------------------------------------------------------
 -- * Example Models
