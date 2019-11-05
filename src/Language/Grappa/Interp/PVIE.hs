@@ -906,6 +906,7 @@ data PVIEOpts =
   pvieDataFiles :: [String],
   pvieMode :: PVIEMode,
   pvieVerbosity :: Int,
+  pvieDebugTruncate :: Maybe Int,
   pvieGD :: Bool
   }
 
@@ -931,6 +932,10 @@ pvieOptsParser =
   <*> (option auto (long "verbosity" <> short 'v'
                     <> help "Verbosity level for debugging"
                     <> showDefault <> value 0 <> metavar "VERBOSITY"))
+  <*> (option (Just <$> auto)
+       (long "truncate" <> short 'T'
+        <> help "Truncate length for debugging strings"
+        <> showDefault <> value Nothing <> metavar "TRUNCATE"))
   <*> (flag False True
        (long "gd" <>
         help "Use gradient descent instead of BFGS to optimize (only meaningful in training mode)"))
@@ -941,9 +946,16 @@ parsePVIEOpts = execParser (info (pvieOptsParser <**> helper)
                             (fullDesc <>
                              progDesc "FIXME: description of PVIE"))
 
+debugTruncate :: PVIEOpts -> String -> String
+debugTruncate opts s
+  | Just l <- pvieDebugTruncate opts
+  , length s >= l = take l s ++ " ..."
+debugTruncate _ s = s
+
 -- | Print debugging info if the verbosity level is @>= level@
 debugM :: PVIEOpts -> Int -> String -> IO ()
-debugM opts level s | pvieVerbosity opts >= level = traceM s
+debugM opts level s
+  | pvieVerbosity opts >= level = traceM (debugTruncate opts s)
 debugM _ _ _ = return ()
 
 -- | Find the parameters that /minimize/ the given differentiable function
