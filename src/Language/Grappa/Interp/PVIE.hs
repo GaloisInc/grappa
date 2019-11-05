@@ -302,23 +302,41 @@ embedGradAndRet dim f =
      params_grad <- getMutParams n
      liftIO $ gradAndRet n f params params_grad
 
+-- | A computation for initializing parameters
+type InitM = ReaderT VIDimAsgn (MutParamsT MWCRandM)
+
+runInitM :: InitM a -> MWC.GenIO -> VIDimAsgn -> MutParams -> IO a
+runInitM m gen asgn mut_params =
+  runRand gen $ runMutParamsT (runReaderT m asgn) mut_params
+
+simpleInitFun :: (VIDimAsgn -> MWCRandM [Double]) -> InitM ()
+simpleInitFun initFun =
+  do asgn <- ask
+     params <- lift $ lift $ initFun asgn
+     let params_v = SV.fromList params
+     mut_params <- getMutParams (length params)
+     liftIO $ SV.copy mut_params params_v
 
 -- | A computation for growing sequences of parameters
-type GrowM = ReaderT (VIDimAsgn, VIDimAsgn) (MutParamsT (ParamsT IO))
+type GrowM = ReaderT (VIDimAsgn, VIDimAsgn) (MutParamsT (ParamsT MWCRandM))
 
-runGrowM :: GrowM a -> VIDimAsgn -> VIDimAsgn -> Params -> MutParams -> IO a
-runGrowM m asgn new_asgn params new_params =
+runGrowM :: GrowM a -> MWC.GenIO -> VIDimAsgn -> VIDimAsgn ->
+            Params -> MutParams -> IO a
+runGrowM m gen asgn new_asgn params new_params =
+  runRand gen $
   runParamsT (runMutParamsT (runReaderT m (asgn, new_asgn)) new_params) params
 
-simpleGrowFun :: VIDim -> GrowM ()
-simpleGrowFun dim =
+simpleGrowFun :: VIDim -> (VIDimAsgn -> MWCRandM [Double]) -> GrowM ()
+simpleGrowFun dim initFun =
   do (old_asgn, new_asgn) <- ask
      params <- getParams (evalVIDim dim old_asgn)
      old_mut_params <- getMutParams (evalVIDim dim old_asgn)
      liftIO $ SV.copy old_mut_params params
      new_mut_params <-
        getMutParams (evalVIDim dim new_asgn - evalVIDim dim old_asgn)
-     liftIO $ SMV.set new_mut_params 0 -- FIXME: initialize these somehow!
+     inits_l <- lift $ lift $ lift $ initFun new_asgn
+     let inits_v = SV.fromList $ drop (SV.length params) inits_l
+     liftIO $ SV.copy new_mut_params inits_v
 
 type PPFun = ReaderT VIDimAsgn (ParamsT IO) PP.Doc
 
@@ -338,6 +356,7 @@ applyPPFun f asgn params = runParamsT (runReaderT f asgn) params
 
 type EntropyFun = ParamsGradM Double
 type ScaledGradPDFFun a = Double -> a -> ParamsGradM ()
+type InitFun = InitM ()
 type GrowFun = GrowM ()
 
 {-
@@ -412,6 +431,9 @@ data VIDistFam a =
     -- the supplied mutable vector
     viDistScaledGradPDF :: ScaledGradPDFFun a,
 
+    -- | Randomly initialize the parameters of this distribution family
+    viDistInit :: InitFun,
+
     -- | Grow a vector of parameters from the dimensionality implied by one
     -- assignment to that of another, larger one, storing the result in the
     -- given mutable vector (assuming it has the correct size) and initializing
@@ -425,18 +447,21 @@ data VIDistFam a =
 
 -- | Build a distribution family for a "simple" distribution, meaning it is not
 -- a composite of multiple distributions on sub-components.  Such a distribution
--- is defined by a dimensionality expression, a sampling function, and
--- differentiable functions for the entropy and log PDF.
+-- is defined by a dimensionality expression, a sampling function,
+-- differentiable functions for the entropy and log PDF, and an initialization
+-- function for the parameters.
 simpleVIFam :: String -> VIDim -> (Params -> MWCRandM a) -> DiffFun ->
-               (a -> DiffFun) -> VIDistFam a
-simpleVIFam nm dim sampleFun entropyFun pdfFun =
+               (a -> DiffFun) -> (VIDimAsgn -> MWCRandM [Double]) ->
+               VIDistFam a
+simpleVIFam nm dim sampleFun entropyFun pdfFun initFun =
   VIDistFam
   { viDistDim = dim
   , viDistSample = embedSamplingFun dim sampleFun
   , viDistEntropy = embedGradAndRet dim entropyFun
   , viDistScaledGradPDF =
       (\scale a -> embedScaledGrad dim (pdfFun a) scale)
-  , viDistGrowParams = simpleGrowFun dim
+  , viDistInit = simpleInitFun initFun
+  , viDistGrowParams = simpleGrowFun dim initFun
   , viDistPP = simplePPFun dim nm
   }
 
@@ -456,6 +481,7 @@ tupleVIFam ds =
         foldrADT getConst (>>) (return ()) $
         mapTuple2 (\(Compose d) a ->
                     Const $ viDistScaledGradPDF d scale a) ds tup)
+  , viDistInit = foldrADT (viDistInit . getCompose) (>>) (return ()) ds
   , viDistGrowParams =
     foldrADT (viDistGrowParams . getCompose) (>>) (return ()) ds
   , viDistPP =
@@ -490,6 +516,7 @@ vecDistVIFam ds =
         SVGen.zipWithM_ (\d x -> viDistScaledGradPDF d scale x) ds v
       else
         error "vecDist distribution: wrong size vector!")
+  , viDistInit = SVGen.mapM_ viDistInit ds
   , viDistGrowParams = SVGen.mapM_ viDistGrowParams ds
   , viDistPP =
     do pps <- mapM viDistPP $ SVGen.toList ds
@@ -516,14 +543,17 @@ vecIIDVIFam len d =
            SVGen.forM_ v (viDistScaledGradPDF d scale)
            else
            error "IID distribution: wrong size vector!")
+  , viDistInit =
+    do asgn <- ask
+       replicateM_ (evalVIDim len asgn) (viDistInit d)
   , viDistGrowParams =
     do (old_asgn, new_asgn) <- ask
        replicateM_ (evalVIDim len old_asgn) (viDistGrowParams d)
-       let num_new_params =
-             evalVIDim (len * viDistDim d) new_asgn
-             - evalVIDim (len * viDistDim d) old_asgn
-       new_mut_params <- getMutParams num_new_params
-       liftIO $ SMV.set new_mut_params 0 -- FIXME: initialize these somehow!
+       g <- lift $ lift $ lift $ nthGenIO 0
+       let num_new_elems = evalVIDim len new_asgn - evalVIDim len old_asgn
+       replicateM_ num_new_elems $
+         do new_params <- getMutParams (evalVIDim (viDistDim d) new_asgn)
+            liftIO $ runInitM (viDistInit d) g new_asgn new_params
   , viDistPP =
     do asgn <- ask
        let n = evalVIDim len asgn
@@ -552,9 +582,11 @@ evalVIDistFamExpr files (VIDistFamExpr m) = evalStateT m (VIDimVar 0, files)
 -- distribution is defined by a dimensionality expression, a sampling function,
 -- and differentiable functions for the entropy and log PDF.
 simpleVIFamExpr :: String -> VIDim -> (Params -> MWCRandM a) -> DiffFun ->
-                   (a -> DiffFun) -> VIDistFamExpr a
-simpleVIFamExpr nm dim sampleFun entropyFun pdfFun =
-  VIDistFamExpr $ return $ simpleVIFam nm dim sampleFun entropyFun pdfFun
+                   (a -> DiffFun) -> (VIDimAsgn -> MWCRandM [Double]) ->
+                   VIDistFamExpr a
+simpleVIFamExpr nm dim sampleFun entropyFun pdfFun initFun =
+  VIDistFamExpr $ return $
+  simpleVIFam nm dim sampleFun entropyFun pdfFun initFun
 
 -- | The constant distribution (also known as the delta distribution), that
 -- returns a single value with unit probability
@@ -563,6 +595,7 @@ deltaVIFamExpr a =
   simpleVIFamExpr ("Delta(" ++ grappaShow a ++ ")")
   0 (\_ -> return a) (\_ -> 0)
   (\x _ -> if x == a then 0 else log 0)
+  (const $ return [])
 
 -- | Build a distribution family expression for the normal distribution, where
 -- we use absolute value of @sigma@ to map it to the non-negative reals
@@ -571,6 +604,12 @@ normalVIFamExpr =
   simpleVIFamExpr "Normal" 2 (\ps -> mwcNormal (ps SV.! 0) (abs (ps SV.! 1)))
   (\ps -> 0.5 * (1 + log (2 * pi) + log ((ps V.! 1) * (ps V.! 1))))
   (\x ps -> Log.ln $ normalDensityUnchecked (ps V.! 0) (abs (ps V.! 1)) (fromDouble x))
+  (\_ ->
+    -- Init mu from the standard normal and sigma from the inverse gamma
+    do mu <- random MWC.standard
+       inv_sigma_sq <- mwcGamma 1 1
+       let sigma = 1 / sqrt inv_sigma_sq
+       return [mu,sigma])
 
 -- | Build a distribution family expression for the uniform distribution over
 -- the range @(min a b, max a b]@
@@ -583,6 +622,13 @@ uniformVIFamExpr =
        && fromDouble x <= max (ps V.! 0) (ps V.! 1) then
       log $ abs (ps V.! 1 - ps V.! 0)
     else log 0)
+  (\_ ->
+    -- Initialize to a sub-interval of the unit interval by setting lower =
+    -- uniform(0,1) and upper = lower + uniform(0,1) * (1 - lower)
+    do lower <- mwcUniform 0 1
+       upper_nonnorm <- mwcUniform 0 1
+       let upper = lower + upper_nonnorm * (1 - lower)
+       return [lower, upper])
 
 -- | Build a distribution family expression for the categorical distribution
 -- over @[0,..,n-1]@ with relative probabilities @[a1,..,an]@, with the special
@@ -599,6 +645,11 @@ categoricalVIFamExpr dim =
     if n == 0 && x == 0 then 1 else
       if x < 0 || x >= n then 0 else
         log (ps V.! x))
+  (\asgn ->
+    -- Initialize the probabilities from a Dirichlet distribution
+    let n = evalVIDim dim asgn in
+    if n == 0 then return [] else
+      mwcDirichlet (replicate n 1))
 
 -- | Build a distribution family expression for the gamma distribution, where
 -- we use absolute value of @k@ and @theta@ to them to the non-negative reals
@@ -612,6 +663,12 @@ gammaVIFamExpr =
   (\x ps ->
     Log.ln $
     gammaDensityUnchecked (abs (ps V.! 0)) (abs (ps V.! 1)) (fromDouble x))
+  (\_ ->
+    -- Initialize k and theta from exponentials (because their actual conjugate
+    -- priors are messy and I'm too busy for that)
+    do k <- mwcExponential 1
+       theta <- mwcExponential 1
+       return [k,theta])
 
 -- | Build a distribution family expression for the gamma distribution over
 -- probabilities, i.e., in log space, where the @k@ and @theta@ parameters are
@@ -628,6 +685,14 @@ gammaProbVIFamExpr =
     Log.ln $
     gammaDensityUnchecked (exp (ps V.! 0)) (exp (ps V.! 1))
     (fromDouble $ probToLogR x))
+  (\_ ->
+    -- Initialize (exp k) and (exp theta) from the exponential distribution, in
+    -- keeping with the initialization for gammaVIFamExpr, above. NOTE: this
+    -- kind of sucks, because we are just taking log (log uniform(0,1)), and
+    -- taking two logarithms in a row probably loses a lot of precision.
+    do exp_k <- mwcExponential 1
+       exp_theta <- mwcExponential 1
+       return [log exp_k, log exp_theta])
 
 -- | Build a distribution family expression for the beta distribution, where
 -- we use absolute value of @alpha@ and @beta@ to keep them non-negative
@@ -643,6 +708,14 @@ betaVIFamExpr =
   (\x ps ->
     Log.ln $
     betaDensityUnchecked (abs (ps V.! 0)) (abs (ps V.! 1)) (fromDouble x))
+  (\_ ->
+    -- Initialize alpha and beta from the exponential distribution, because why
+    -- not? And because, as Wikipedia says (for the Dirichlet distribution,
+    -- which is similar), "In the published literature there is no practical
+    -- algorithm to efficiently generate samples from" the conjugate prior.
+    do alpha <- mwcExponential 1
+       beta <- mwcExponential 1
+       return [alpha,beta])
 
 -- | Build a distribution family expression for the beta distribution over
 -- probabilities, i.e., in log space, where the @alpha@ and @beta@ parameters
@@ -661,6 +734,14 @@ betaProbVIFamExpr =
     Log.ln $
     betaDensityLog (exp (ps V.! 0)) (exp (ps V.! 1))
     (fmap fromDouble $ fromProb x))
+  (\_ ->
+    -- Initialize (exp alpha) and (exp beta) from the exponential distribution,
+    -- in keeping with the initialization for betaVIFamExpr, above. NOTE: this
+    -- kind of sucks, because we are just taking log (log uniform(0,1)), and
+    -- taking two logarithms in a row probably loses a lot of precision.
+    do exp_alpha <- mwcExponential 1
+       exp_beta <- mwcExponential 1
+       return [log exp_alpha, log exp_beta])
 
 -- | Build a distribution family for the dirichlet distribution, where the
 -- alphas are in log space, so they can never be negative and so that the
@@ -678,6 +759,12 @@ dirichletVIFamExpr dim =
     - sum (flip map alphas $ \alpha -> (alpha - 1) * digamma alpha))
   (\x ps -> Log.ln $
             dirichletDensity (SV.toList $ SV.map exp ps) (map fromDouble x))
+  (\asgn ->
+    -- Initialize alphas from the exponential distribution, because why not? And
+    -- because, as Wikipedia says, "In the published literature there is no
+    -- practical algorithm to efficiently generate samples from" the conjugate
+    -- prior.
+    replicateM (evalVIDim dim asgn) (mwcExponential 1))
 
 -- | Build a distribution family for the dirichlet distribution over
 -- probabilities, i.e., over lists of reals in log space. The alphas are in log
@@ -697,6 +784,14 @@ dirichletProbVIFamExpr dim =
   (\x ps -> Log.ln $
             dirichletDensityLog (SV.toList $ SV.map exp ps)
             (map (fmap fromDouble . fromProb) x))
+  (\asgn ->
+    -- Initialize (exp alphas) from the exponential distribution, because why
+    -- not? And because, as Wikipedia says, "In the published literature there
+    -- is no practical algorithm to efficiently generate samples from" the
+    -- conjugate prior. NOTE: this kind of sucks, because we are just taking log
+    -- (log uniform(0,1)), and taking two logarithms in a row probably loses a
+    -- lot of precision.
+    map log <$> replicateM (evalVIDim dim asgn) (mwcExponential 1))
 
 -- | Bind a fresh dimensionality variable in a distribution family expression
 bindVIDimFamExpr :: (VIDim -> VIDistFamExpr a) -> VIDistFamExpr a
@@ -785,8 +880,8 @@ instance FromJSON PVIEModel where
 instance ToJSON PVIEModel where
   toEncoding = genericToEncoding defaultOptions
 
-readPVIEModel :: VIDistFam a -> String -> IO PVIEModel
-readPVIEModel d filename =
+readPVIEModel :: MWC.GenIO -> VIDistFam a -> String -> IO PVIEModel
+readPVIEModel g d filename =
   doesFileExist filename >>= \ex ->
   if ex then
     -- If filename exists, then read it
@@ -794,11 +889,11 @@ readPVIEModel d filename =
   else
     -- Otherwise, start with 0 for all dimensionality variables, and
     -- initialize all params to 1
-    --
-    -- FIXME HERE: have VIDistFams initialize their mut_params
-    let asgn = zeroAsgn $ viDimFirstUnusedVar $ viDistDim d
-        params = SV.replicate (evalVIDim (viDistDim d) asgn) 1 in
-    return $ PVIEModel asgn params
+    do let asgn = zeroAsgn $ viDimFirstUnusedVar $ viDistDim d
+       mut_params <- SMV.new (evalVIDim (viDistDim d) asgn)
+       runInitM (viDistInit d) g asgn mut_params
+       params <- SV.freeze mut_params
+       return $ PVIEModel asgn params
 
 
 -- | The PVIE modes: training and evaluation
@@ -981,7 +1076,7 @@ pvie_train opts d log_p = init_pvie where
   init_pvie :: IO (PVIEModel, Double)
   init_pvie = do
     g <- MWC.createSystemRandom
-    PVIEModel asgn params <- readPVIEModel d (pvieModelFile opts)
+    PVIEModel asgn params <- readPVIEModel g d (pvieModelFile opts)
     mut_params <- SV.unsafeThaw params
     -- Generate the initial value to try to beat
     val <- optimize opts (neg_elbo_with_grad opts g d log_p asgn) mut_params
@@ -1033,7 +1128,7 @@ pvie_train opts d log_p = init_pvie where
     -- The next assignment we will try = increment next_var
     let new_asgn = incrAsgn next_var asgn
     -- Copy our current best parameters into our scratch area
-    runGrowM (viDistGrowParams d) asgn new_asgn last_params scratch
+    runGrowM (viDistGrowParams d) g asgn new_asgn last_params scratch
     -- Optimize those parameters
     new_val <- optimize opts (neg_elbo_with_grad opts g d log_p asgn) scratch
     -- Test how much we improved
