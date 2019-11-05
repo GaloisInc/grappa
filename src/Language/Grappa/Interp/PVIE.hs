@@ -577,6 +577,14 @@ newtype VIDistFamExpr a =
 evalVIDistFamExpr :: [String] -> VIDistFamExpr a -> IO (VIDistFam a)
 evalVIDistFamExpr files (VIDistFamExpr m) = evalStateT m (VIDimVar 0, files)
 
+entropyNaNProtect :: String -> DiffFun -> DiffFun
+entropyNaNProtect s f ps =
+  let ret = f ps in
+  if isNaN ret then
+    error ("NaN entropy for distribution " ++ s ++ ", params = " ++ show ps)
+  else
+    ret
+
 -- | Build a distribution family expression for a "simple" distribution, meaning
 -- it is not a composite of multiple distributions on sub-components.  Such a
 -- distribution is defined by a dimensionality expression, a sampling function,
@@ -586,7 +594,7 @@ simpleVIFamExpr :: String -> VIDim -> (Params -> MWCRandM a) -> DiffFun ->
                    VIDistFamExpr a
 simpleVIFamExpr nm dim sampleFun entropyFun pdfFun initFun =
   VIDistFamExpr $ return $
-  simpleVIFam nm dim sampleFun entropyFun pdfFun initFun
+  simpleVIFam nm dim sampleFun (entropyNaNProtect nm entropyFun) pdfFun initFun
 
 -- | The constant distribution (also known as the delta distribution), that
 -- returns a single value with unit probability
@@ -602,7 +610,7 @@ deltaVIFamExpr a =
 normalVIFamExpr :: VIDistFamExpr R
 normalVIFamExpr =
   simpleVIFamExpr "Normal" 2 (\ps -> mwcNormal (ps SV.! 0) (abs (ps SV.! 1)))
-  (\ps -> 0.5 * (1 + log (2 * pi) + log ((ps V.! 1) * (ps V.! 1))))
+  (\ps ->  0.5 * (1 + log (2 * pi) + log ((ps V.! 1) * (ps V.! 1))))
   (\x ps -> Log.ln $ normalDensityUnchecked (ps V.! 0) (abs (ps V.! 1)) (fromDouble x))
   (\_ ->
     -- Init mu from the standard normal and sigma from the inverse gamma
@@ -632,19 +640,21 @@ uniformVIFamExpr =
 
 -- | Build a distribution family expression for the categorical distribution
 -- over @[0,..,n-1]@ with relative probabilities @[a1,..,an]@, with the special
--- case that @n=0@ is treated like @n=1@, meaning it always returns @0@
+-- case that @n=0@ is treated like @n=1@, meaning it always returns @0@. Note
+-- that we map each @ai@ to the non-negatives using 'abs'.
 categoricalVIFamExpr :: VIDim -> VIDistFamExpr Int
 categoricalVIFamExpr dim =
   simpleVIFamExpr "Categorical" dim
-  (\ps -> random $ MWC.categorical ps)
+  (\ps -> random $ MWC.categorical $ SV.map abs ps)
   (\ps ->
-    let p_sum = V.sum ps in
-    V.sum $ V.map (\p -> (p / p_sum) * log (p / p_sum)) ps)
+    let ps' = V.map abs ps
+        p_sum = V.sum ps' in
+    V.sum $ V.map (\p -> (p / p_sum) * log (p / p_sum)) ps')
   (\x ps ->
     let n = V.length ps in
     if n == 0 && x == 0 then 1 else
       if x < 0 || x >= n then 0 else
-        log (ps V.! x))
+        log $ abs (ps V.! x))
   (\asgn ->
     -- Initialize the probabilities from a Dirichlet distribution
     let n = evalVIDim dim asgn in
