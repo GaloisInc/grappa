@@ -639,22 +639,28 @@ uniformVIFamExpr =
        return [lower, upper])
 
 -- | Build a distribution family expression for the categorical distribution
--- over @[0,..,n-1]@ with relative probabilities @[a1,..,an]@, with the special
--- case that @n=0@ is treated like @n=1@, meaning it always returns @0@. Note
--- that we map each @ai@ to the non-negatives using 'abs'.
+-- over @[0,..,n-1]@ with relative probabilities @[a1/a,..,an/a]@, where each
+-- @ai@ is the absolute value of the @i@th parameter and @a@ is the sum of the
+-- @ai@s. The special case that @n=0@ is treated like @n=1@, meaning it always
+-- returns @0@.
 categoricalVIFamExpr :: VIDim -> VIDistFamExpr Int
 categoricalVIFamExpr dim =
   simpleVIFamExpr "Categorical" dim
-  (\ps -> random $ MWC.categorical $ SV.map abs ps)
+  (\ps ->
+    let ps' = SV.map abs ps
+        p_sum = SV.sum ps' in
+    random $ MWC.categorical $ SV.map (/ p_sum) ps')
   (\ps ->
     let ps' = V.map abs ps
         p_sum = V.sum ps' in
     V.sum $ V.map (\p -> (p / p_sum) * log (p / p_sum)) ps')
   (\x ps ->
-    let n = V.length ps in
+    let ps' = V.map abs ps
+        p_sum = V.sum ps'
+        n = V.length ps in
     if n == 0 && x == 0 then 1 else
       if x < 0 || x >= n then 0 else
-        log $ abs (ps V.! x))
+        log (abs (ps' V.! x) / p_sum))
   (\asgn ->
     -- Initialize the probabilities from a Dirichlet distribution
     let n = evalVIDim dim asgn in
