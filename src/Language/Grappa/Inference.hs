@@ -341,6 +341,33 @@ pvieMethod = InferenceMethod
   , imModelCopies = 1
   }
 
+runPVIEAnom :: GrappaShow (ProbFunReprF a) =>
+               GExpr ProbFunRepr (VIDist a) ->
+               GExpr ProbFunRepr (a -> Prob) -> Source a ->
+               GExpr ProbFunRepr (Dist a) ->
+               IO ()
+runPVIEAnom (unGExpr -> dist_expr) (unGExpr -> anom_score) _ (unGExpr -> log_p) =
+  pvie_anom_main dist_expr (probToLogR . log_p) anom_score
+
+pvieAnomMethod :: InferenceMethod
+pvieAnomMethod = InferenceMethod
+  { imName = "pvie_anom"
+  , imDescription = "Prototype Variational Inference Engine with Anomaly Scores"
+  , imParams =
+    [ InferenceParam "dist_fam" "The distribution family to fit to the model"
+      -- FIXME: make the following a nice way to write "VIDist a"
+      (BaseType
+       (TypeNameInfo
+        { tn_th_name = ''VIDist, tn_arity = 1, tn_ctors = Nothing })
+       [VarType (TVar 0)])
+    , InferenceParam "anom_score" "The function to compute the anomaly score"
+      -- FIXME: make the following a nice way to write "a -> Prob"
+      (ArrowType (VarType (TVar 0)) probType)
+    ]
+  , imRunFunc = 'runPVIEAnom
+  , imModelCopies = 1
+  }
+
 allMethods :: [InferenceMethod]
 allMethods =
   [ priorMethod
@@ -352,6 +379,7 @@ allMethods =
   , pythonMethod
   , cdpmMethod
   , pvieMethod
+  , pvieAnomMethod
   ]
 
 findMethod :: Text -> Maybe InferenceMethod

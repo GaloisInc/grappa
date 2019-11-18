@@ -647,9 +647,8 @@ categoricalVIFamExpr :: VIDim -> VIDistFamExpr Int
 categoricalVIFamExpr dim =
   simpleVIFamExpr "Categorical" dim
   (\ps ->
-    let ps' = SV.map abs ps
-        p_sum = SV.sum ps' in
-    random $ MWC.categorical $ SV.map (/ p_sum) ps')
+    -- NOTE: MWC.categorical normalizes the weights for us
+    random $ MWC.categorical $ SV.map abs ps)
   (\ps ->
     let ps' = V.map abs ps
         p_sum = V.sum ps' in
@@ -660,7 +659,7 @@ categoricalVIFamExpr dim =
         n = V.length ps in
     if n == 0 && x == 0 then 1 else
       if x < 0 || x >= n then 0 else
-        log (abs (ps' V.! x) / p_sum))
+        log ((ps' V.! x) / p_sum))
   (\asgn ->
     -- Initialize the probabilities from a Dirichlet distribution
     let n = evalVIDim dim asgn in
@@ -1085,6 +1084,24 @@ pvie_main dist_expr log_p =
          do val <- pvie_eval opts dist_fam log_p
             putStrLn ("Surprisal score: " ++ show val)
 
+-- | The main entrypoint for the PVIE engine with anomaly score
+pvie_anom_main :: GrappaShow a => VIDistFamExpr a -> (a -> Double) ->
+                  (a -> Prob) -> IO ()
+pvie_anom_main dist_expr log_p anom_score =
+  do opts <- parsePVIEOpts
+     dist_fam <- evalVIDistFamExpr (pvieDataFiles opts) dist_expr
+     case pvieMode opts of
+       PVIETrainMode ->
+         do (model@(PVIEModel asgn params), val) <-
+              pvie_train opts dist_fam log_p
+            pp <- applyPPFun (viDistPP dist_fam) asgn params
+            debugM opts 1 ("Final model:\n" ++ show pp)
+            debugM opts 1 ("Surprisal score: " ++ show val)
+            writeJSONfile (pvieModelFile opts) model
+       PVIEEvalMode ->
+         do score <- pvie_eval_anom opts dist_fam anom_score
+            putStrLn $ show (1 - min 1 (probToR score))
+
 -- | The PVIE eval mode
 pvie_eval :: GrappaShow a => PVIEOpts -> VIDistFam a -> (a -> Double) ->
              IO Double
@@ -1094,6 +1111,19 @@ pvie_eval opts d log_p =
      grad <- SMV.new (evalVIDim (viDistDim d) asgn)
      val <- neg_elbo_with_grad opts g d log_p asgn params grad
      return val
+
+-- | Evaluate the anomaly score, which is the average over @N@ samples of the
+-- supplied anomaly score function applied to each sample
+pvie_eval_anom :: GrappaShow a => PVIEOpts -> VIDistFam a -> (a -> Prob) ->
+                  IO Prob
+pvie_eval_anom opts d anom_score =
+  do PVIEModel asgn params <- readJSONfile $ pvieModelFile opts
+     g <- MWC.createSystemRandom
+     anom_scores <-
+       replicateM num_samples $
+       do samp <- runSamplingM (viDistSample d) g asgn params
+          return (probToLogR $ anom_score samp)
+     return $ logRToProb (sum anom_scores / fromIntegral num_samples)
 
 -- | The PVIE training mode
 pvie_train :: GrappaShow a => PVIEOpts -> VIDistFam a -> (a -> Double) ->
