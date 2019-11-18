@@ -442,11 +442,17 @@ instance Interp__vec_head ProbFunRepr a where
 instance Interp__vec_tail ProbFunRepr a where
   interp__vec_tail = GExpr V.tail
 
+instance Interp__vec_nth ProbFunRepr a where
+  interp__vec_nth = GExpr (V.!)
+
 instance Interp__vec_length ProbFunRepr a where
   interp__vec_length = GExpr V.length
 
 instance Interp__vec_map ProbFunRepr a b where
   interp__vec_map = GExpr V.map
+
+instance Interp__vec_foldr ProbFunRepr a b where
+  interp__vec_foldr = GExpr V.foldr'
 
 instance Interp__vec_iid ProbFunRepr a where
   interp__vec_iid = GExpr $ \n d xs ->

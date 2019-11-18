@@ -770,11 +770,17 @@ class ValidExprRepr repr => Interp__vec_head repr a where
 class ValidExprRepr repr => Interp__vec_tail repr a where
   interp__vec_tail :: GExpr repr (Vector a -> Vector a)
 
+class ValidExprRepr repr => Interp__vec_nth repr a where
+  interp__vec_nth :: GExpr repr (Vector a -> Int -> a)
+
 class ValidExprRepr repr => Interp__vec_length repr a where
   interp__vec_length :: GExpr repr (Vector a -> Int)
 
 class ValidExprRepr repr => Interp__vec_map repr a b where
   interp__vec_map :: GExpr repr ((a -> b) -> Vector a -> Vector b)
+
+class ValidExprRepr repr => Interp__vec_foldr repr a b where
+  interp__vec_foldr :: GExpr repr ((a -> b -> b) -> b -> Vector a -> b)
 
 
 ----------------------------------------------------------------------
