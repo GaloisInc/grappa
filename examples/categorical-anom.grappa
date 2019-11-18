@@ -1,0 +1,55 @@
+
+--
+-- A model of a sequence of integers drawn from a categorical distribution
+--
+
+fun nth (Cons x _) (0::Int) = x
+    nth (Cons _ xs) n = nth xs (n-1)
+    nth Nil _ = gerror 0
+
+fun sum_f _ Nil = 0
+    sum_f f (Cons x xs) = f x + sum_f f xs
+
+fun replicate (0::Int) _ = Nil
+    replicate n x = Cons x (replicate (n - 1) x)
+
+model categorical_seq log_probs { num_xs, xs } =
+  num_xs ~ arbitrary
+  xs ~ vec_iid num_xs (categorical log_probs)
+
+model categorical_seqs (alpha :: Double) { num_probs, probs, (num_xss, xss) } =
+  num_probs ~ (arbitrary :: Dist Int)
+  probs ~ dirichletProb (replicate num_probs alpha)
+  -- probs ~ arbitrary
+  num_xss ~ arbitrary
+  xss ~ vec_iid num_xss (categorical_seq probs)
+
+-- Return the minimum value of log (P(x) / E_y(P(y))) for each x in the data
+-- stream, where E_y is the expected value over y
+fun anom_score (num_probs, probs, (num_xss, xss)) =
+  let expected_prob =
+    logRealToProb (sum_f (\p -> probToReal p * probToLogReal p) probs) in
+  let min_prob =
+    (vec_foldr
+       (\ (_,xs) xss_p ->
+          min xss_p
+          (vec_foldr
+            (\x xs_p -> min (nth probs x) xs_p)
+            1
+            xs))
+       1 xss) in
+  min_prob / expected_prob
+
+fun seqs_add_lens seqs =
+  viDelta (vec_length seqs,
+           vec_map (\seq -> (vec_length seq, seq)) seqs)
+
+-- Parameters for this particular categorical distribution
+fun max_n = 10
+fun global_alpha = 1
+
+main =
+  _ ~ categorical_seqs global_alpha
+  using pvie_anom (viTuple3 (viDelta max_n) (viDirichletProb max_n)
+                   (viMappedJSONInput seqs_add_lens),
+                   anom_score)
