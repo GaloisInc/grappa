@@ -164,6 +164,10 @@ atV (RVector v) i = v V.! i
 generateV :: Int -> (Int -> Double) -> RVector
 generateV n f = RVector $ V.generate n f
 
+-- | Map over an 'RVector'
+mapV :: (R -> R) -> RVector -> RVector
+mapV f (RVector v) = RVector (V.map f v)
+
 -- | Fold over an 'RVector'
 foldrV :: (R -> b -> b) -> b -> RVector -> b
 foldrV f b (RVector v) = V.foldr' f b v
@@ -246,6 +250,10 @@ fromListPV = ProbVector . V.fromList . map probToLogR
 -- | Extract the elements of a probability vector as a list
 toListPV :: ProbVector -> [Prob]
 toListPV = map logRToProb . V.toList . unProbVector
+
+-- | Map over a 'ProbVector'
+mapPV :: (Prob -> Prob) -> ProbVector -> ProbVector
+mapPV f (ProbVector v) = ProbVector (V.map (probToLogR . f . logRToProb) v)
 
 -- | Fold over a 'ProbVector'
 foldrPV :: (Prob -> b -> b) -> b -> ProbVector -> b

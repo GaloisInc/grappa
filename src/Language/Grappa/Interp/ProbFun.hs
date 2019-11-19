@@ -509,6 +509,9 @@ instance Interp__boxV ProbFunRepr where
 instance Interp__unboxV ProbFunRepr where
   interp__unboxV = GExpr (\v -> V.generate (lengthV v) (atV v))
 
+instance Interp__mapV ProbFunRepr where
+  interp__mapV = GExpr mapV
+
 instance Interp__foldrV ProbFunRepr where
   interp__foldrV = GExpr foldrV
 
@@ -568,6 +571,9 @@ instance Interp__boxPV ProbFunRepr where
 
 instance Interp__unboxPV ProbFunRepr where
   interp__unboxPV = GExpr (\v -> V.generate (lengthPV v) (atPV v))
+
+instance Interp__mapPV ProbFunRepr where
+  interp__mapPV = GExpr mapPV
 
 instance Interp__foldrPV ProbFunRepr where
   interp__foldrPV = GExpr foldrPV
