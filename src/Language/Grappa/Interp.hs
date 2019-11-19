@@ -1016,6 +1016,9 @@ class ValidExprRepr repr => Interp__viVecDist repr a where
 class ValidExprRepr repr => Interp__viVecIID repr a where
   interp__viVecIID :: GExpr repr (VISize -> VIDist a -> VIDist (Vector a))
 
+class ValidExprRepr repr => Interp__viIIDV repr where
+  interp__viIIDV :: GExpr repr (VISize -> VIDist R -> VIDist RVector)
+
 class ValidExprRepr repr => Interp__viIIDPV repr where
   interp__viIIDPV :: GExpr repr (VISize -> VIDist Prob -> VIDist ProbVector)
 

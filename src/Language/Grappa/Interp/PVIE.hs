@@ -850,13 +850,22 @@ iidVIFamExpr :: VIDim -> VIDistFamExpr a -> VIDistFamExpr [a]
 iidVIFamExpr len d_expr =
   xformVIDistFamExpr V.toList V.fromList $ vecIIDVIFamExpr len d_expr
 
--- | The distribution family expression over lists with a given length whose
--- elements are drawn IID from the supplied distribution family expression
+-- | The distribution family expression over unboxed 'ProbVector's with a given
+-- length whose elements are drawn IID from the supplied distribution family
+-- expression
 iidPVVIFamExpr :: VIDim -> VIDistFamExpr Prob -> VIDistFamExpr ProbVector
 iidPVVIFamExpr len d_expr =
   xformVIDistFamExpr ProbVector unProbVector $
   VIDistFamExpr (vecIIDVIFam len <$> runVIDistFamExpr
                  (xformVIDistFamExpr probToLogR logRToProb d_expr))
+
+-- | The distribution family expression over unboxed 'RVector's with a given
+-- length whose elements are drawn IID from the supplied distribution family
+-- expression
+iidVVIFamExpr :: VIDim -> VIDistFamExpr R -> VIDistFamExpr RVector
+iidVVIFamExpr len d_expr =
+  xformVIDistFamExpr RVector unRVector $
+  VIDistFamExpr (vecIIDVIFam len <$> runVIDistFamExpr d_expr)
 
 -- | This distribution family reads an input of type @a@ from @stdin@ as a JSON
 -- file and then passes that input to the supplied function to build a

@@ -717,5 +717,8 @@ instance Interp__viVecDist ProbFunRepr a where
 instance Interp__viVecIID ProbFunRepr a where
   interp__viVecIID = GExpr vecIIDVIFamExpr
 
+instance Interp__viIIDV ProbFunRepr where
+  interp__viIIDV = GExpr iidVVIFamExpr
+
 instance Interp__viIIDPV ProbFunRepr where
   interp__viIIDPV = GExpr iidPVVIFamExpr
