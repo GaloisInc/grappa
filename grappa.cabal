@@ -176,7 +176,6 @@ test-suite grappa-tests
   main-is: Main.hs
   hs-source-dirs: test
   other-modules: Language.Grappa.Test.Parsing
-                 Language.Grappa.Test.Numeric
   build-depends: base
                , grappa
                , hspec

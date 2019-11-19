@@ -24,14 +24,15 @@ data ParserCase = ParserCase
 
 runCase :: ParserCase -> Spec
 runCase c = it (description c) $
-  case parseDecls startPos (input c) of
+  case parseDecls (startPos "Test Input") (input c) of
     Left err -> expectationFailure (show err)
     Right rs -> rs `shouldBe` output c
 
 --
 
 fun n cs = FunDecl n Nothing cs
-model n cs = FunDecl n Nothing [FunCase [] ModelExp cs]
+model n cs = FunDecl n Nothing [FunCase [] (ModelExp cs ())]
+modelCase p e = ModelCase p (LiteralExp (IntegerLit 1) ()) e
 
 sample x y r = SampleStmt x y r
 ret = ReturnStmt
@@ -62,6 +63,6 @@ basicModel = ParserCase
   , input = "model mapp { n } = n ~ d\n"
   , output =
       [ model "mapp"
-          [ ModelCase (varP "n") Nothing
+          [ modelCase (varP "n")
             (sample (varV "n") (varE "d") ret) ]]
   }
