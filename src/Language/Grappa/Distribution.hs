@@ -164,6 +164,10 @@ atV (RVector v) i = v V.! i
 generateV :: Int -> (Int -> Double) -> RVector
 generateV n f = RVector $ V.generate n f
 
+-- | Fold over an 'RVector'
+foldrV :: (R -> b -> b) -> b -> RVector -> b
+foldrV f b (RVector v) = V.foldr' f b v
+
 -- | Take the sum of an 'RVector'
 sumV :: RVector -> Double
 sumV (RVector v) = V.foldl' (+) 0 v
@@ -242,6 +246,11 @@ fromListPV = ProbVector . V.fromList . map probToLogR
 -- | Extract the elements of a probability vector as a list
 toListPV :: ProbVector -> [Prob]
 toListPV = map logRToProb . V.toList . unProbVector
+
+-- | Fold over a 'ProbVector'
+foldrPV :: (Prob -> b -> b) -> b -> ProbVector -> b
+foldrPV f b (ProbVector v) = V.foldr' (f . logRToProb) b v
+
 
 -- | Take the sum of a 'ProbVector'. The algorithm for this is adapted from
 -- 'Log.sum', though that function requires a 'Foldable' instance.

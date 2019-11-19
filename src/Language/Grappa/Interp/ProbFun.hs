@@ -372,6 +372,18 @@ instance Interp__betaProb ProbFunRepr where
   interp__betaProb = GExpr $ \alpha beta p ->
     Prob $ betaDensityLog alpha beta (fromProb p)
 
+instance Interp__iidV ProbFunRepr where
+  interp__iidV = GExpr $ \n d xs ->
+    if lengthV xs == n then
+      foldrV ((*) . d) 1 xs
+    else 0
+
+instance Interp__iidPV ProbFunRepr where
+  interp__iidPV = GExpr $ \n d xs ->
+    if lengthPV xs == n then
+      foldrPV ((*) . d) 1 xs
+    else 0
+
 instance Interp__dirichlet ProbFunRepr where
   interp__dirichlet = GExpr $ \alphas xs ->
     Prob $ dirichletDensity (toList alphas) (toList xs)
@@ -497,6 +509,9 @@ instance Interp__boxV ProbFunRepr where
 instance Interp__unboxV ProbFunRepr where
   interp__unboxV = GExpr (\v -> V.generate (lengthV v) (atV v))
 
+instance Interp__foldrV ProbFunRepr where
+  interp__foldrV = GExpr foldrV
+
 instance Interp__sumV ProbFunRepr where
   interp__sumV = GExpr sumV
 
@@ -553,6 +568,9 @@ instance Interp__boxPV ProbFunRepr where
 
 instance Interp__unboxPV ProbFunRepr where
   interp__unboxPV = GExpr (\v -> V.generate (lengthPV v) (atPV v))
+
+instance Interp__foldrPV ProbFunRepr where
+  interp__foldrPV = GExpr foldrPV
 
 instance Interp__sumPV ProbFunRepr where
   interp__sumPV = GExpr sumPV
