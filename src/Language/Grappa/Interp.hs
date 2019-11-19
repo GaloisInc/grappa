@@ -776,6 +776,9 @@ class ValidExprRepr repr => Interp__vec_nth repr a where
 class ValidExprRepr repr => Interp__vec_length repr a where
   interp__vec_length :: GExpr repr (Vector a -> Int)
 
+class ValidExprRepr repr => Interp__vec_generate repr a where
+  interp__vec_generate :: GExpr repr (Int -> (Int -> a) -> Vector a)
+
 class ValidExprRepr repr => Interp__vec_map repr a b where
   interp__vec_map :: GExpr repr ((a -> b) -> Vector a -> Vector b)
 
@@ -798,6 +801,12 @@ class ValidExprRepr repr => Interp__sumV repr where
 
 class ValidExprRepr repr => Interp__generateV repr where
   interp__generateV :: GExpr repr (Int -> (Int -> R) -> RVector)
+
+class ValidExprRepr repr => Interp__boxV repr where
+  interp__boxV :: GExpr repr (Vector R -> RVector)
+
+class ValidExprRepr repr => Interp__unboxV repr where
+  interp__unboxV :: GExpr repr (RVector -> Vector R)
 
 class ValidExprRepr repr => Interp__rowsM repr where
   interp__rowsM :: GExpr repr (RMatrix -> Int)
@@ -842,6 +851,12 @@ class ValidExprRepr repr => Interp__atPV repr where
 
 class ValidExprRepr repr => Interp__generatePV repr where
   interp__generatePV :: GExpr repr (Int -> (Int -> Prob) -> ProbVector)
+
+class ValidExprRepr repr => Interp__boxPV repr where
+  interp__boxPV :: GExpr repr (Vector Prob -> ProbVector)
+
+class ValidExprRepr repr => Interp__unboxPV repr where
+  interp__unboxPV :: GExpr repr (ProbVector -> Vector Prob)
 
 class ValidExprRepr repr => Interp__sumPV repr where
   interp__sumPV :: GExpr repr (ProbVector -> Prob)

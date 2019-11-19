@@ -448,6 +448,9 @@ instance Interp__vec_nth ProbFunRepr a where
 instance Interp__vec_length ProbFunRepr a where
   interp__vec_length = GExpr V.length
 
+instance Interp__vec_generate ProbFunRepr a where
+  interp__vec_generate = GExpr V.generate
+
 instance Interp__vec_map ProbFunRepr a b where
   interp__vec_map = GExpr V.map
 
@@ -487,6 +490,12 @@ instance Interp__atV ProbFunRepr where
 
 instance Interp__generateV ProbFunRepr where
   interp__generateV = GExpr generateV
+
+instance Interp__boxV ProbFunRepr where
+  interp__boxV = GExpr (\v -> generateV (V.length v) (v V.!))
+
+instance Interp__unboxV ProbFunRepr where
+  interp__unboxV = GExpr (\v -> V.generate (lengthV v) (atV v))
 
 instance Interp__sumV ProbFunRepr where
   interp__sumV = GExpr sumV
@@ -538,6 +547,12 @@ instance Interp__atPV ProbFunRepr where
 
 instance Interp__generatePV ProbFunRepr where
   interp__generatePV = GExpr generatePV
+
+instance Interp__boxPV ProbFunRepr where
+  interp__boxPV = GExpr (\v -> generatePV (V.length v) (v V.!))
+
+instance Interp__unboxPV ProbFunRepr where
+  interp__unboxPV = GExpr (\v -> V.generate (lengthPV v) (atPV v))
 
 instance Interp__sumPV ProbFunRepr where
   interp__sumPV = GExpr sumPV
