@@ -1,0 +1,72 @@
+
+fun length Nil = 0
+    length (Cons _ xs) = 1 + length xs
+
+fun map f Nil = Nil
+    map f (Cons x xs) = Cons (f x) (map f xs)
+
+fun nth (Cons x _) 0 = x
+    nth (Cons _ xs) n = nth xs (n-1)
+    nth Nil _ = gerror 1
+
+-- Normalize an RVector so it sums to 1
+fun norm_vector v =
+  let tot = sumV v in
+  mapV (\x -> x / tot) v
+
+-- Normalize an RVector and convert it to a ProbVector
+fun probs_norm_vector v =
+  let norm_v = norm_vector v in
+  generatePV (lengthV v) (\i -> realToProb (atV norm_v i))
+
+model iid (0::Int) _ { Nil } = nothing
+      iid n d { Cons x xs } =
+  x ~ d
+  xs ~ iid (n-1) d
+
+model unit_dist { () } = nothing
+
+model
+  hmm_seq (0::Int) trans obs cur_probs { Nil } =
+    () ~ scaleDist (sumPV cur_probs) unit_dist
+  hmm_seq n trans obs cur_probs { Cons (x::Int) xs } =
+    -- x ~ categoricalV obs_v
+    x ~ arbitrary -- NOTE: we factor in the probability of x into next_probs
+    next_probs = mulPMV trans (nth (toRowsPM obs) x * cur_probs)
+    xs ~ hmm_seq (n-1) trans obs next_probs
+
+model hmm_seq_top trans obs init { num_xs, xs } =
+  num_xs ~ arbitrary
+  xs ~ hmm_seq num_xs trans obs init
+
+model hmm_seqs alpha_t alpha_o n_hid n_obs { trans_vs_raw, obs_vs_raw, init_raw,
+                                             (num_xss, xss) } =
+  -- n_hid ~ arbitrary
+  -- n_obs ~ arbitrary
+  trans_vs_raw ~ iid n_hid (iidV n_hid (gamma alpha_t 1))
+  trans = fromColsPM (map probs_norm_vector trans_vs_raw)
+  obs_vs_raw ~ iid n_hid (iidV n_obs (gamma alpha_o 1))
+  obs = fromColsPM (map probs_norm_vector obs_vs_raw)
+  init_raw ~ iidV n_hid (gamma alpha_t 1)
+  init = probs_norm_vector init_raw
+  num_xss ~ arbitrary
+  xss ~ vec_iid num_xss (hmm_seq_top trans obs init)
+
+
+fun add_xss_lens xss =
+  viDelta (vec_length xss,
+           vec_map (\xs -> (length xs, xs)) xss)
+
+fun global_num_hids = 2
+fun global_num_obs = 2
+
+-- NOTE: we are using RVectors instead of ProbVectors both so we effectively get
+-- sparsity for very small probabilities and also so the matrix multiplication
+-- is faster
+
+main =
+  _ ~ hmm_seqs 0.01 0.01 global_num_hids global_num_obs
+  using pvie (viTuple4 (viIID global_num_hids (viIIDV global_num_hids viGamma))
+              (viIID global_num_hids (viIIDV global_num_hids viGamma))
+              (viIIDV global_num_hids viGamma)
+              (viMappedJSONInput add_xss_lens))
