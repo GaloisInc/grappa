@@ -931,6 +931,7 @@ data PVIEOpts =
   pvieMode :: PVIEMode,
   pvieVerbosity :: Int,
   pvieDebugTruncate :: Maybe Int,
+  pvieNumSamples :: Int,
   pvieGD :: Bool
   }
 
@@ -960,6 +961,9 @@ pvieOptsParser =
        (long "truncate" <> short 'T'
         <> help "Truncate length for debugging strings"
         <> showDefault <> value Nothing <> metavar "TRUNCATE"))
+  <*> (option auto (long "numsamples" <> short 'N'
+                    <> help "Number of samples for approximating the variational family"
+                    <> showDefault <> value 1000 <> metavar "NUMSAMPLES"))
   <*> (flag False True
        (long "gd" <>
         help "Use gradient descent instead of BFGS to optimize (only meaningful in training mode)"))
@@ -1009,15 +1013,11 @@ optimize opts f mut_params =
      SV.copy mut_params opt_params
      return $ eval_f opt_params
 
--- FIXME HERE: make pvie_epsilon and num_samples into command-line options
+-- FIXME HERE: make pvie_epsilon into command-line options
 
 -- | The amount that PVIE has to improve in an interation to seem "better"
 pvie_epsilon :: Double
 pvie_epsilon = 1.0e-6
-
--- | FIXME: make this be a command-line option somehow!
-num_samples :: Int
-num_samples = 1000
 
 -- | The negative infinity value
 negInfinity :: Double
@@ -1041,7 +1041,7 @@ elbo_with_grad :: GrappaShow a => PVIEOpts -> MWC.GenIO ->
                   VIDistFam a -> (a -> Double) -> VIDimAsgn ->
                   (Params -> MutParams -> IO Double)
 elbo_with_grad opts g d log_p asgn params grad =
-  (replicateM num_samples $
+  (replicateM (pvieNumSamples opts) $
    do s <- runSamplingM (viDistSample d) g asgn params
       return (s, log_p s)) >>= \samples_log_ps ->
   case find (isInfiniteOrNaN . snd) samples_log_ps of
@@ -1062,7 +1062,7 @@ elbo_with_grad opts g d log_p asgn params grad =
            runParamsGradM (viDistScaledGradPDF d (-1e9) samp) asgn params grad
          return negInfinity
     _ ->
-      do let n = fromIntegral num_samples
+      do let n = fromIntegral (pvieNumSamples opts)
          entr <- runParamsGradM (viDistEntropy d) asgn params grad
          debugM opts 2 ("Entropy: " ++ show entr)
          entr_grad <- SV.freeze grad
@@ -1129,10 +1129,10 @@ pvie_eval_anom opts d anom_score =
   do PVIEModel asgn params <- readJSONfile $ pvieModelFile opts
      g <- MWC.createSystemRandom
      anom_scores <-
-       replicateM num_samples $
+       replicateM (pvieNumSamples opts) $
        do samp <- runSamplingM (viDistSample d) g asgn params
           return (probToLogR $ anom_score samp)
-     return $ logRToProb (sum anom_scores / fromIntegral num_samples)
+     return $ logRToProb (sum anom_scores / fromIntegral (pvieNumSamples opts))
 
 -- | The PVIE training mode
 pvie_train :: GrappaShow a => PVIEOpts -> VIDistFam a -> (a -> Double) ->
