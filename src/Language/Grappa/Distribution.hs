@@ -150,7 +150,7 @@ sumProb ps = Prob $ Log.sum $ map fromProb ps
 ----------------------------------------------------------------------
 
 -- | A bundled up type for unboxed real-valued vectors
-newtype RVector = RVector { unRVector :: Vector Double } deriving (Num,Eq)
+newtype RVector = RVector { unRVector :: Vector Double } deriving (Num,Eq,Show)
 
 -- | Return the length of an 'RVector'
 lengthV :: RVector -> Int
@@ -185,7 +185,7 @@ toListV :: RVector -> [Double]
 toListV = V.toList . unRVector
 
 -- | The type of real-valued matrices
-newtype RMatrix = RMatrix { unRMatrix :: Matrix Double } deriving (Num,Eq)
+newtype RMatrix = RMatrix { unRMatrix :: Matrix Double } deriving (Num,Eq,Show)
 
 -- | Return the number of rows of an 'RMatrix'
 rowsM :: RMatrix -> Int
@@ -229,7 +229,7 @@ mulVM (RVector v) (RMatrix m) = RVector (v M.<# m)
 
 -- | The type of (efficient storable) vectors of values in log space
 newtype ProbVector = ProbVector { unProbVector :: Vector Double }
-                   deriving (Eq)
+                   deriving (Eq, Show)
 
 -- | Return the length of a 'ProbVector'
 lengthPV :: ProbVector -> Int
@@ -259,20 +259,32 @@ mapPV f (ProbVector v) = ProbVector (V.map (probToLogR . f . logRToProb) v)
 foldrPV :: (Prob -> b -> b) -> b -> ProbVector -> b
 foldrPV f b (ProbVector v) = V.foldr' (f . logRToProb) b v
 
+-- | Apply a binary operator pointwise to two probability vectors
+binOpPV :: (Prob -> Prob -> Prob) -> ProbVector -> ProbVector -> ProbVector
+binOpPV f v1 v2 =
+  generatePV (min (lengthPV v1) (lengthPV v2)) (\i -> f (atPV v1 i) (atPV v2 i))
+
+instance Num ProbVector where
+  (+) = binOpPV (+)
+  (-) = binOpPV (-)
+  (*) = binOpPV (*)
+  abs = mapPV abs
+  signum = mapPV signum
+  fromInteger i = generatePV 1 (const $ fromInteger i)
 
 -- | Take the sum of a 'ProbVector'. The algorithm for this is adapted from
 -- 'Log.sum', though that function requires a 'Foldable' instance.
 sumPV :: ProbVector -> Prob
 sumPV (ProbVector v) | V.length v == 0 = Prob $ Log.Exp $ log 0
 sumPV (ProbVector v) =
-  let max_v = V.foldl' max 0 v in
+  let max_v = V.foldl1' max v in
   Prob $ Log.Exp $
   if isInfinite max_v then max_v else
     max_v + Log.log1p (V.foldl' (\r x -> r + Log.expm1 (x - max_v)) 0 v
                        + fromIntegral (V.length v - 1))
 
 -- | The type of matrices of values in log space
-newtype ProbMatrix = ProbMatrix (Matrix Double) deriving (Eq)
+newtype ProbMatrix = ProbMatrix (Matrix Double) deriving (Eq, Show)
 
 -- | Return the number of rows of a probability matrix
 rowsPM :: ProbMatrix -> Int
@@ -284,7 +296,15 @@ colsPM (ProbMatrix m) = M.cols m
 
 -- | Return the @(i,j)@th element of a 'ProbMatrix'
 atPM :: ProbMatrix -> Int -> Int -> Prob
-atPM (ProbMatrix m) i j = Prob $ Log.Exp $ atIndex m (i,j)
+atPM pm@(ProbMatrix m) i j =
+  if i >= rowsPM pm then
+    error ("atPM index out of bounds: row " ++ show i ++ " >= " ++ show (rowsPM pm))
+    else
+    if j >= colsPM pm then
+      error ("atPM index out of bounds: column " ++ show j
+             ++ " >= " ++ show (colsPM pm))
+    else
+      Prob $ Log.Exp $ atIndex m (i,j)
 
 -- | Build a matrix of probabilities from a list of its rows
 fromRowsPM :: [ProbVector] -> ProbMatrix
