@@ -370,24 +370,6 @@ type family DistsIn (ds :: [*]) (c :: * -> Constraint) :: Constraint where
   DistsIn '[] c = ()
   DistsIn (d ': ds) c = (c d, DistsIn ds c)
 
--- | Type family that applies every constraint in a list to @a@
-type family ApplyAll (cs :: [* -> Constraint]) (a :: *) :: Constraint where
-  ApplyAll '[] a = ()
-  ApplyAll ('(:) c cs) a = (c a, ApplyAll cs a)
-
--- | Type-class version of 'ApplyAll'
-class ApplyAll cs a => All cs a
-instance ApplyAll cs a => All cs a
-
--- | Type family that applies every constraint in a list to @a@
-type family ReprApplyAll (cs :: [((* -> *) -> *) -> (* -> *) -> Constraint]) (d :: (* -> *) -> *) (a :: * -> *) :: Constraint where
-  ReprApplyAll '[] d f = ()
-  ReprApplyAll ('(:) c cs) d f = (c d f, ReprApplyAll cs d f)
-
--- | Type-class version of 'ApplyAll'
-class ReprApplyAll cs d f => ReprAll cs d f
-instance ReprApplyAll cs d f => ReprAll cs d f
-
 -- | This constraint says that the distribution type @d@ is continuous, i.e.,
 -- isomorphic to the reals.
 --
