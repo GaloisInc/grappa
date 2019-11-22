@@ -1009,7 +1009,7 @@ optimize opts f mut_params =
               debugM opts 2 ("grad = " ++ show ret)
               return ret
      let (opt_params,_) =
-           minimizeVD meth 0.0001 1000 1 0.1 eval_f grad_f params
+           minimizeVD meth 0.0001 1000 100 0.1 eval_f grad_f params
      SV.copy mut_params opt_params
      return $ eval_f opt_params
 
