@@ -102,7 +102,7 @@ stackFileText config =
   ([ "packages:"
    , "- '.'" ] ++
    local_pkgs ++
-   [ "resolver: lts-10.4"
+   [ "resolver: lts-12.26"
    , "extra-deps:"
    , "- alex-tools-0.3"
    , "- microtimer-0.0.1.2"
