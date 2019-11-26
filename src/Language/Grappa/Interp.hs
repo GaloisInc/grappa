@@ -698,6 +698,12 @@ class ValidExprRepr repr => Interp__beta repr where
 class ValidExprRepr repr => Interp__betaProb repr where
   interp__betaProb :: GExpr repr (R -> R -> Dist Prob)
 
+class ValidExprRepr repr => Interp__iidV repr where
+  interp__iidV :: GExpr repr (Int -> Dist R -> Dist RVector)
+
+class ValidExprRepr repr => Interp__iidPV repr where
+  interp__iidPV :: GExpr repr (Int -> Dist Prob -> Dist ProbVector)
+
 class ValidExprRepr repr => Interp__dirichlet repr where
   interp__dirichlet :: GExpr repr (GList R -> Dist (GList R))
 
@@ -776,6 +782,9 @@ class ValidExprRepr repr => Interp__vec_nth repr a where
 class ValidExprRepr repr => Interp__vec_length repr a where
   interp__vec_length :: GExpr repr (Vector a -> Int)
 
+class ValidExprRepr repr => Interp__vec_generate repr a where
+  interp__vec_generate :: GExpr repr (Int -> (Int -> a) -> Vector a)
+
 class ValidExprRepr repr => Interp__vec_map repr a b where
   interp__vec_map :: GExpr repr ((a -> b) -> Vector a -> Vector b)
 
@@ -793,11 +802,23 @@ class ValidExprRepr repr => Interp__lengthV repr where
 class ValidExprRepr repr => Interp__atV repr where
   interp__atV :: GExpr repr (RVector -> Int -> R)
 
+class ValidExprRepr repr => Interp__mapV repr where
+  interp__mapV :: GExpr repr ((R -> R) -> RVector -> RVector)
+
+class ValidExprRepr repr => Interp__foldrV repr where
+  interp__foldrV :: GExpr repr ((R -> b -> b) -> b -> RVector -> b)
+
 class ValidExprRepr repr => Interp__sumV repr where
   interp__sumV :: GExpr repr (RVector -> R)
 
 class ValidExprRepr repr => Interp__generateV repr where
   interp__generateV :: GExpr repr (Int -> (Int -> R) -> RVector)
+
+class ValidExprRepr repr => Interp__boxV repr where
+  interp__boxV :: GExpr repr (Vector R -> RVector)
+
+class ValidExprRepr repr => Interp__unboxV repr where
+  interp__unboxV :: GExpr repr (RVector -> Vector R)
 
 class ValidExprRepr repr => Interp__rowsM repr where
   interp__rowsM :: GExpr repr (RMatrix -> Int)
@@ -842,6 +863,18 @@ class ValidExprRepr repr => Interp__atPV repr where
 
 class ValidExprRepr repr => Interp__generatePV repr where
   interp__generatePV :: GExpr repr (Int -> (Int -> Prob) -> ProbVector)
+
+class ValidExprRepr repr => Interp__boxPV repr where
+  interp__boxPV :: GExpr repr (Vector Prob -> ProbVector)
+
+class ValidExprRepr repr => Interp__unboxPV repr where
+  interp__unboxPV :: GExpr repr (ProbVector -> Vector Prob)
+
+class ValidExprRepr repr => Interp__mapPV repr where
+  interp__mapPV :: GExpr repr ((Prob -> Prob) -> ProbVector -> ProbVector)
+
+class ValidExprRepr repr => Interp__foldrPV repr where
+  interp__foldrPV :: GExpr repr ((Prob -> b -> b) -> b -> ProbVector -> b)
 
 class ValidExprRepr repr => Interp__sumPV repr where
   interp__sumPV :: GExpr repr (ProbVector -> Prob)
@@ -1000,6 +1033,9 @@ class ValidExprRepr repr => Interp__viVecDist repr a where
 
 class ValidExprRepr repr => Interp__viVecIID repr a where
   interp__viVecIID :: GExpr repr (VISize -> VIDist a -> VIDist (Vector a))
+
+class ValidExprRepr repr => Interp__viIIDV repr where
+  interp__viIIDV :: GExpr repr (VISize -> VIDist R -> VIDist RVector)
 
 class ValidExprRepr repr => Interp__viIIDPV repr where
   interp__viIIDPV :: GExpr repr (VISize -> VIDist Prob -> VIDist ProbVector)

@@ -3,7 +3,7 @@
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, FlexibleContexts #-}
 {-# LANGUAGE TypeOperators, UndecidableInstances, ScopedTypeVariables #-}
 {-# LANGUAGE FunctionalDependencies, DeriveFunctor, StandaloneDeriving #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, UndecidableSuperClasses #-}
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 module Language.Grappa.GrappaInternals where
