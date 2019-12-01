@@ -74,3 +74,13 @@ extra-package-dbs: []
 # 
 # Allow a newer minor version of GHC than the snapshot specifies
 # compiler-check: newer-minor
+
+extra-include-dirs:
+- /nix/store/lap4ss9v1z6swv2pn7ldk7hh7wbysh8f-openblas-0.3.7/include/
+- /nix/store/775ccw24airsllx1xzdsw602fppmx4mw-eigen-3.3.7/include/
+- /nix/store/610x1adrb71048kazpdh1a5aif2nhg77-gsl-2.6/include/
+- /nix/store/8xjx234slv2mj3csgpxkzw6phny4ylkd-liblapack-3.8.0/include/
+extra-lib-dirs:
+- /nix/store/lap4ss9v1z6swv2pn7ldk7hh7wbysh8f-openblas-0.3.7/lib/
+- /nix/store/610x1adrb71048kazpdh1a5aif2nhg77-gsl-2.6/lib/
+- /nix/store/8xjx234slv2mj3csgpxkzw6phny4ylkd-liblapack-3.8.0/lib/
