@@ -26,7 +26,6 @@ import           GHC.Exts (Constraint)
 import qualified Numeric.AD.Mode as AD
 import qualified Numeric.AD.Mode.Forward as AD
 import qualified Data.Text as T
-import qualified Data.Maybe as KWQ_M
 
 import           Language.Grappa.GrappaInternals
 
