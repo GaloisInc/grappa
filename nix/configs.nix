@@ -60,6 +60,7 @@ let
         };
         haskell-packages = params: self: super:
           let whichGHC = params.ghcver or default_ghc;
+              withLLVM = params.llvm or false;
           in
             (with pkgs.haskell.lib; {
 
@@ -74,35 +75,80 @@ let
                       with pkgs; addExtraLibraries
                         (dontHaddock                # Grappa haddocks are currently broken
                           super.grappa
-                        )
+                        ) (grappaDeps ++
+                           [
+                             pkgs.makeWrapper
+                             (pkgs.haskell.packages.${whichGHC}.ghcWithPackages (hpkgs:
+                               grappalibDeps ++ [ hpkgs.alex hpkgs.happy ]))
+                           ]);
+                    grappalibDeps = builtins.filter (x: x != null) super.grappa.propagatedBuildInputs;
+                    grappaDeps =
                         [
                           pkgs.openblas
                           pkgs.eigen
                           pkgs.gsl
                           (pkgs.liblapack.override { shared = true; })
                           lbfgspp
-                          pkgs.stack
-                          pkgs.pkgconfig
                           pkgs.gmp
+                          pkgs.gcc
                         ];
-                in withDeps.overrideAttrs (oldAttrs:
-                  {
-                    # The grappa package includes some C++ bits that
-                    # it normally gets via a submodules checkout.
-                    # These packages are separately installed, so
-                    # update the local cabal file to find those
-                    # installed locations.
-                    preConfigurePhases = let o = oldAttrs.preConfigurePhases;
-                                         in o ++ ["patchCabalcbits" "patchDummyBuild"];
+                    enhanced = withDeps.overrideAttrs (oldAttrs:
+                      {
+                        # The grappa package includes some C++ bits that
+                        # it normally gets via a submodules checkout.
+                        # These packages are separately installed, so
+                        # update the local cabal file to find those
+                        # installed locations.
+                        preConfigurePhases = let o = oldAttrs.preConfigurePhases;
+                                             in o ++ ["patchCabalcbits" "patchDummyBuild"];
 
-                    patchCabalcbits = ''
-                      sed -i -e 's=include-dirs: =include-dirs: ${pkgs.eigen}/include/eigen3 ${lbfgspp}/include ${pkgs.gsl}/include =' grappa.cabal
-                    '';
+                        patchCabalcbits = ''
+                          sed -i -e 's=include-dirs: =include-dirs: ${pkgs.eigen}/include/eigen3 ${lbfgspp}/include ${pkgs.gsl}/include =' grappa.cabal
+                        '';
 
-                    patchDummyBuild = ''
-                      cp grappa-build/{DummyBuild,}Main.hs
-                    '';
-                  });
+                        patchDummyBuild = ''
+                          cp grappa-build/{DummyBuild,}Main.hs
+                        '';
+
+                        # The grappa-c executable needs to be able to
+                        # invoke GHC (and underlying compiler +
+                        # binutils), with either the grappa library
+                        # package available or the grappa library
+                        # dependency packages available.  The
+                        # following code is adapted from the
+                        # nixpkgs/pkgs/development/haskell-modules/with-packages-wrapper.nix
+                        # to create a grappa-c wrapper that sets the
+                        # environment to enable the presence of these
+                        # dependencies.
+                        postInstall =
+                          let tgtghc = pkgs.haskell.packages.${whichGHC}.ghcWithPackages (hpkgs:
+                                grappaDeps ++ grappalibDeps ++ [ hpkgs.alex hpkgs.happy ]);
+                              ghcCommand'   = "ghc";
+                              ghcCommand = "${ghcCommand'}";
+                              ghcCommandCaps= pkgs.lib.toUpper ghcCommand';
+                              libDir        = "${tgtghc}/lib/${ghcCommand}-${tgtghc.version}";
+                              docDir        = "${tgtghc}/share/doc/ghc/html";
+                              packageCfgDir = "${libDir}/package.conf.d";
+                              # CLang is needed on Darwin for -fllvm to work:
+                              # https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/codegens.html#llvm-code-generator-fllvm
+                              llvm          = pkgs.lib.makeBinPath
+                                ([ llvmPackages.llvm ]
+                                 ++ pkgs.lib.optional stdenv.targetPlatform.isDarwin llvmPackages.clang);
+                          in ''
+                              . ${pkgs.makeWrapper}/nix-support/setup-hook
+
+                              wrapProgram $out/bin/grappa-c \
+                                --set "NIX_${ghcCommandCaps}"        "$out/bin/${ghcCommand}"     \
+                                --set "NIX_${ghcCommandCaps}PKG"     "$out/bin/${ghcCommand}-pkg" \
+                                --set "NIX_${ghcCommandCaps}_DOCDIR" "${docDir}"                  \
+                                --set "NIX_${ghcCommandCaps}_LIBDIR" "${libDir}"                  \
+                                --prefix PATH : ${tgtghc}/bin \
+                                --prefix PATH : ${pkgs.gcc}/bin \
+                                --prefix PATH : ${pkgs.binutils-unwrapped}/bin \
+                                ${pkgs.lib.optionalString withLLVM ''--prefix "PATH" ":" "${llvm}"''}
+                        '';
+                      });
+                in enhanced;
             });
       };
       addSrcs = master-srcs;
