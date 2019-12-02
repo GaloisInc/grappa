@@ -3,7 +3,8 @@ let pkgs = import <nixpkgs> {};
     lcl_grappa-c = grappa-c.overrideAttrs (oldAttrs: { src = ./.; });
     lcldev_grappa-c = lcl_grappa-c.env.overrideAttrs (oldAttrs: {
       shellHook = ''
-        # Set this to build the local diretory grappa library instead of using the installed version.
+        # Set this to build the local directory's grappa library
+        # instead of using the installed version.
         export GRAPPA_LIB=$(pwd)
 
         # When grappa-c is run with --cabal or --stack, it will use
