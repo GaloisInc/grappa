@@ -43,12 +43,8 @@ let
         # Add packages here to override the normal
         # source of those packages (e.g. Hackage) and
         # build them from the locations described.
-        grappa = github "grappa" // { local = /home/kquick/work/grappa; };
+        grappa = github "grappa";
         alex-tools = hackageVersion "0.3.1";
-        # hmatrix-gsl = githubsrc "haskell-numerics" "hmatrix" // {
-        #   # local = /home/kquick/work/AFRL-ADIDRUS-COSMAN/hmatrix;
-        #   subpath = "packages/gsl";
-        # };
       };
     };
 
@@ -61,7 +57,6 @@ let
       srcs = inputSrcs;
       overrides = {
         global = params: {
-          # lapack = pkgs.lapack.override { shared = true; };
         };
         haskell-packages = params: self: super:
           let whichGHC = params.ghcver or default_ghc;
@@ -70,27 +65,6 @@ let
 
               Diff = dontCheck super.Diff; # tests need QuickCheck 2.12 updates
               
-              # hmatrix-gsl = appendConfigureFlag super.hmatrix-gsl "-fdisable-default-paths";
-              # hmatrix-gsl = addExtraLibrary super.hmatrix-gsl pkgs.openblas;
-
-              hmatrix-gsl =
-              let hmatrix-gsl-base = super.callPackage
-                    ({ mkDerivation, array, base, gsl, hmatrix, process, random, vector, openblas
-                     }:
-                       mkDerivation {
-                         pname = "hmatrix-gsl";
-                         version = "0.19.0.1";
-                         sha256 = "0v6dla426x4ywaq59jm89ql1i42n39iw6z0j378xwb676v9kfxhm";
-                         libraryHaskellDepends = [
-                           array base hmatrix process random vector
-                         ];
-                         libraryPkgconfigDepends = [ gsl openblas ];
-                         description = "Numerical computation";
-                         license = pkgs.stdenv.lib.licenses.gpl3;
-                       }) {inherit (pkgs) gsl openblas;};
-                in let x = addExtraLibraries hmatrix-gsl-base [ pkgs.openblas pkgs.gsl ];
-                              in addBuildDepends x  [ pkgs.openblas pkgs.gsl ];
-
               ad = addExtraLibrary (super.ad) [ pkgs.gmp ];
 
               layout-rules = markUnbroken super.layout-rules;
