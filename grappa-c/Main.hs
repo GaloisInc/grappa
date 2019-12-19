@@ -1,15 +1,24 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
-import Control.Monad (void)
-import System.Directory
-import System.Environment
-import System.FilePath
-import System.FilePath ((</>))
-import System.Process
-import System.Console.GetOpt
+import           CabalBld
+import           Control.Monad ( void, when )
+import           Control.Monad.IO.Class ( liftIO )
+import           Data.Maybe ( catMaybes )
+import           Data.Time.Clock ( getCurrentTime )
+import qualified DynFlags
+import qualified GHC
+import           GHC.Paths ( libdir )
+import           StackBld
+import           StringBuffer ( stringToStringBuffer )
+import           System.Console.GetOpt
+import           System.Directory
+import           System.Environment
+import           System.Exit
+import           System.FilePath
+import           System.Process
+
 
 --
 -- * Configurations
@@ -18,29 +27,21 @@ import System.Console.GetOpt
 -- | Grappa configuration, describing the compilation target, etc.
 data GrappaConfig =
   GrappaConfig
-  { inputFile :: FilePath,
+  { inputFile :: FilePath
     -- ^ The Grappa source file we are compiling
-    projectPath :: FilePath,
-    -- ^ Path where we are going to create our stack project
-    outputFile :: FilePath,
+  , projectPath :: FilePath
+    -- ^ Path where we are going to create our stack or cabal project
+  , outputFile :: FilePath
     -- ^ The path to the binary that we will create
-    grappaLibPath :: Maybe FilePath
+  , grappaLibPath :: Maybe FilePath
     -- ^ The path where the Grappa library is installed locally, if at all
+  , compileMethod :: CompileMethod
   }
 
-cabalFile :: GrappaConfig -> String
-cabalFile config = projectPath config </> "grappa-main.cabal"
-
-mainFile :: GrappaConfig -> String
-mainFile config = projectPath config </> "Main.hs"
-
-stackFile :: GrappaConfig -> String
-stackFile config = projectPath config </> "stack.yaml"
-
-outputPath :: GrappaConfig -> FilePath
-outputPath config = takeDirectory (outputFile config)
+data CompileMethod = Direct | Cabal | Stack
 
 
+----------------------------------------------------------------------
 --
 -- * Creating Haskell Source Files
 --
@@ -51,8 +52,8 @@ escapeInputFile config =
   concatMap (\c -> if c == '"' then ['\\', '"'] else [c]) $
   inputFile config
 
-hsHeader :: GrappaConfig -> String
-hsHeader config = unlines
+fileBody :: GrappaConfig -> String -> String
+fileBody config body = unlines
   [ "{-# LANGUAGE TemplateHaskell #-}"
   , "{-# LANGUAGE QuasiQuotes #-}"
   , "{-# LANGUAGE ViewPatterns #-}"
@@ -61,56 +62,122 @@ hsHeader config = unlines
   , "{-# LANGUAGE FlexibleContexts #-}"
   , "{-# LANGUAGE ConstraintKinds #-}"
   , "{-# LANGUAGE TypeFamilies #-}"
-  , "{-# LANGUAGE TypeFamilies #-}"
   , "{-# OPTIONS_GHC -Wno-all #-}"
   , "module Main where"
-  , "import Language.Grappa.Frontend.Compile(compileGrappa,gtext)"
+  , "import Language.Grappa.Frontend.Compile ( compileGrappa, gtext )"
   , "import Language.Grappa.Interp"
   , "import Language.Grappa.GrappaInternals"
   , "$(compileGrappa \"" ++ escapeInputFile config ++ "\" [gtext|"
+  , body
+  , "|])"
   ]
 
-hsFooter :: String
-hsFooter = "\n|])\n"
 
-cabalFileText :: GrappaConfig -> String
-cabalFileText config = unlines
-  [ "name: grappa-main"
-  , "version: 0.0.1"
-  , "build-type: Simple"
-  , "cabal-version: >=1.10"
-  , ""
-  , "executable " ++ takeFileName (outputFile config)
-  , "  default-language: Haskell2010"
-  , "  hs-source-dirs: ."
-  , "  main-is: Main.hs"
-  , "  ghc-options: -ddump-splices"
-  , "  build-depends: base"
-  , "               , grappa"
-  ]
+----------------------------------------------------------------------
+--
+-- * Direct compilation of Grappa sources
+--
+-- Alternative builds are provided by the --cabal and --stack
+-- command-line flags.
 
-stackFileText :: GrappaConfig -> String
-stackFileText config =
-  let (local_pkgs, extra_deps) =
-        case grappaLibPath config of
-          Just libPath ->
-            ([ "- location: " ++ libPath ++ "/"
-             , "  extra-dep: true" ], [])
-          Nothing ->
-            ([], ["- grappa-1.0"]) in
-  unlines
-  ([ "packages:"
-   , "- '.'" ] ++
-   local_pkgs ++
-   [ "resolver: lts-12.26"
-   , "extra-deps:"
-   , "- alex-tools-0.3"
-   , "- microtimer-0.0.1.2"
-   , "- layout-rules-0.1.0.1"
-   ]
-   ++ extra_deps)
+-- This build process uses GHC directly to compile the fileBody
+-- defined above, with the grappa code substituted into the
+-- TemplateHaskell section and passed to the compileGrappa operation.
+--
+-- This build process takes an optional filepath to the grappa source
+-- distribution (usually supplied via the GRAPPA_LIB environment
+-- variable).  When this filepath is specified, the executable
+-- utilizes the grappa library built from that location; when no
+-- filepath is specified, the grappa library must be registered and
+-- available in the local GHC package set.
+--
+-- For both the local library build or the use of a pre-registered
+-- grappa library, the GHC pkg environment must already contain all
+-- dependencies for the build.  If building using grappa sources for
+-- the grappa library, there are multiple packages that must be
+-- present to build that library.  If building using a pre-built and
+-- registered grappa library, then only that grappa library is
+-- required to be present.  The --cabal or --stack options can be used
+-- for alternative build processes that will perform automatic
+-- dependency fetching.
+modelBuild :: String -> Maybe FilePath -> FilePath -> IO ()
+modelBuild body grappaLibPath outFile =
+  GHC.defaultErrorHandler DynFlags.defaultFatalMessager DynFlags.defaultFlushOut $
+  -- n.b. the following is specific to GHC 8.4.  There are changes in
+  -- later GHC versions that may require changes here as well.
+  GHC.runGhc (Just libdir) $ do
+    dflags <- GHC.getSessionDynFlags
+    void $ GHC.setSessionDynFlags $
+      dflags { GHC.ghcLink = GHC.LinkBinary
+             , GHC.ways = [DynFlags.WayDyn]
+             , GHC.buildTag = DynFlags.mkBuildTag [DynFlags.WayDyn]
+             , GHC.importPaths = catMaybes [ Just "."
+                                           , (\p -> p </> "src") <$> grappaLibPath
+                                           ]
+             , GHC.verbosity = 1
+             }
+      `DynFlags.gopt_set` GHC.Opt_BuildDynamicToo
+      `DynFlags.gopt_set` GHC.Opt_ExternalInterpreter
+      `DynFlags.gopt_set` GHC.Opt_PIC
+
+    case grappaLibPath of
+      Nothing -> return ()
+      Just gp -> liftIO $ runAlexAndHappy gp
+
+    let inp = stringToStringBuffer body
+
+    now <- liftIO $ getCurrentTime
+    let hsFile = outFile <> ".hs" -- This also determines the compilation output file name
+
+    -- n.b. Under GHC 8.8.1, the TargetFile is not required to exist,
+    -- but for pre-8.8, the file must exist (even if targetContents
+    -- supplies the actual inputs).  This also specifies the output
+    -- file name (the extension is removed).
+    liftIO $ writeFile hsFile ""  -- Remove this as unnecessary when using GHC 8.8 or later
+
+    let target = GHC.Target
+          {
+            GHC.targetId = GHC.TargetFile hsFile Nothing
+          , GHC.targetAllowObjCode = False
+          , GHC.targetContents = Just (inp, now)
+          }
+
+    GHC.setTargets [ target ]
+    r <- GHC.load GHC.LoadAllTargets  -- does the compilation to generate the executable
+    liftIO $ do when (GHC.succeeded r) $ do
+                  putStrLn $ "Grappa executable: " <> outFile
+                  exitSuccess
+                putStrLn "Failure building grappa model executable"
+                exitFailure
+
+-- The standard GHC build process does *not* know how to run Alex on
+-- .x files or Happy on .y files to generate compilable Haskell files.
+-- If building using a grappa source library location, the alex and
+-- happy operations must be manually performed to obtain the
+-- corresponding .hs file before invoking the GHC compile operation.
+runAlexAndHappy :: FilePath -> IO ()
+runAlexAndHappy gp = do
+  let srcDir = gp </> "src" </> "Language" </> "Grappa" </> "Frontend"
+      lexerFile = srcDir </> "Lexer.x"
+      lexerHs = srcDir </> "Lexer.hs"
+      parserFile = srcDir </> "Parser.y"
+      parserHs = srcDir </> "Parser.hs"
+  genIfNeeded lexerFile lexerHs "alex"
+  genIfNeeded parserFile parserHs "happy"
+    where
+      genIfNeeded inpF outF cmd = do
+        inE <- doesFileExist inpF
+        otE <- doesFileExist outF
+        when (inE && not otE) $ do
+          let p = proc cmd [ "-o", outF, inpF ]
+          (r,o,e) <- readCreateProcessWithExitCode p ""
+          when (r /= ExitSuccess) $ do putStrLn o
+                                       putStrLn $ "ERROR: " <> e
+                                       putStrLn $ "Running: " <> show p
+                                       exitWith r
 
 
+----------------------------------------------------------------------
 --
 -- * Command-Line Argument Processing
 --
@@ -118,31 +185,35 @@ stackFileText config =
 -- | Grappa command-line options
 data GrappaOption
   = GrappaOutName String
+  | UseCabal (Maybe FilePath)
+  | UseStack (Maybe FilePath)
 
 grappaOptions :: [OptDescr GrappaOption]
 grappaOptions =
-  [ Option "o" [] (ReqArg GrappaOutName "FILE") "output FILE" ]
-
-defaultOutputBinary :: String -> String
-defaultOutputBinary name = dropExtension name
-
-defaultProjectPath :: String -> String
-defaultProjectPath name = basePath </> "." ++ fileName ++ "-project"
-  where basePath = takeDirectory name
-        fileName = takeBaseName name
+  [ Option "o" [] (ReqArg GrappaOutName "FILE") "output FILE"
+  , Option [] ["cabal"] (OptArg UseCabal "DIR" ) "Use cabal v2 to manage build (in optional project dir)"
+  , Option [] ["stack"] (OptArg UseStack "DIR") "Use stack (in optional project dir)"
+  ]
 
 -- | Build a default configuration from an input Grappa filename
 defaultConfig :: String -> IO GrappaConfig
 defaultConfig inputFile =
   do grappaLibPath <- lookupEnv "GRAPPA_LIB"
-     outputFile <- makeAbsolute (defaultOutputBinary inputFile)
-     projectPath <- makeAbsolute (defaultProjectPath inputFile)
+     outputFile <- makeAbsolute (dropExtension inputFile)
+     let basePath = takeDirectory inputFile
+         fileName = takeBaseName inputFile
+     projectPath <- makeAbsolute (basePath </> "." ++ fileName ++ "-project")
+     let compileMethod = Direct
      return $ GrappaConfig { .. }
 
 -- | Process a command-line option as a modification of a configuration
 processOption :: GrappaConfig -> GrappaOption -> GrappaConfig
-processOption config (GrappaOutName outName) =
-  config { outputFile = outName }
+processOption config (GrappaOutName outName) = config { outputFile = outName }
+processOption config (UseCabal Nothing)      = config { compileMethod = Cabal }
+processOption config (UseCabal (Just path))  = config { compileMethod = Cabal, projectPath = path }
+processOption config (UseStack Nothing)      = config { compileMethod = Stack }
+processOption config (UseStack (Just path))  = config { compileMethod = Stack, projectPath = path }
+
 
 -- | Process the command line into a 'GrappaConfig'
 processSysArgs :: IO GrappaConfig
@@ -154,9 +225,14 @@ processSysArgs =
             return $ foldl processOption config opts
        (_, _, errs) ->
          ioError (userError (concat errs ++ usageInfo header grappaOptions))
-         where header = "Usage: grappa-c [OPTION...] FILE"
+         where header = "Usage: grappa-c [OPTION...] FILE\n\
+                        \ \n\
+                        \ Set the GRAPPA_LIB environment variable to the grappa source\n\
+                        \ tree location to build from grappa, otherwise specify a project\n\
+                        \ directory for cabal or stack builds (not necessary for direct\n\
+                        \ non-cabal, non-stack builds)."
 
-
+----------------------------------------------------------------------
 --
 -- * Top-level Main Function
 --
@@ -164,25 +240,12 @@ processSysArgs =
 main :: IO ()
 main = do
   config <- processSysArgs
-  createDirectoryIfMissing False (projectPath config)
   grappaSource <- readFile (inputFile config)
-  let mainContents = hsHeader config ++ grappaSource ++ hsFooter
-  case grappaLibPath config of
-    Just glibPath ->
-      do let altMainFile = glibPath </> "grappa-build" </> "Main.hs"
-         writeFile altMainFile mainContents
-         let p =
-               (proc "stack" ["install", "grappa:grappa-build",
-                              "--local-bin-path", projectPath config])
-               { cwd = Just glibPath }
-         void $ readCreateProcess p ""
-         copyFile (projectPath config </> "grappa-build") (outputFile config)
-
-    Nothing ->
-      do writeFile (mainFile config) mainContents
-         writeFile (cabalFile config) (cabalFileText config)
-         writeFile (stackFile config) (stackFileText config)
-         let p =
-               (proc "stack" ["install", "--local-bin-path", outputPath config])
-               { cwd = Just (projectPath config) }
-         void $ readCreateProcess p ""
+  let libPath = grappaLibPath config
+  let outFName = outputFile config
+  let mainContents = fileBody config grappaSource
+  let bldFunc = case compileMethod config of
+        Direct -> modelBuild
+        Cabal  -> cabalBuild (projectPath config)
+        Stack  -> stackBuild (projectPath config)
+  bldFunc mainContents libPath outFName

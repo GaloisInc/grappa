@@ -1,0 +1,254 @@
+* Overview
+
+  Grappa consists of a compiler for the grappa language and a library
+  implementing probabilistic functionality described by the language.
+
+  #+BEGIN_EXAMPLE
+
+                  +------------------+
+                  | grappa-c         |
+                  |                  |
+   foo.grappa --->|-->foo.hs--[ghc]--|---> foo binary executable
+                  |             ^    |
+                  |             |    |
+     +---------+  |             |    |
+     | grappa  |----------------+    |
+     | library |  |                  |
+     +---------+  +------------------+
+  
+  #+END_EXAMPLE
+
+  The grappa library can be provided to ~grappa-c~ as either an
+  installed package or by referencing the grappa source directory.
+
+
+** Building grappa-c
+
+  The ~grappa-c~ application is the grappa compiler.
+
+  Building grappa-c itself has no complex *build* requirements, but it
+  may have more extensive *runtime* requirements (see below).
+
+** Building the grappa library
+
+  The Grappa library provides the implementation of the probabilistic
+  programming language functionality and is the realization of the
+  input grappa language functionality.
+
+  The grappa library may either be built as an installation, or it may
+  be implicitly built by ~grappa-c~ if ~grappa-c~ is provided with a
+  source reference to the grappa library when it is run.
+
+  At whichever point the grappa library is built, it has the following
+  requirements:
+
+  * ~alex~ :: to generate the Haskell lexical analyzer from the ~Lexer.x~ file in the ~src~ directory tree.
+  * ~happy~ :: to generate the Haskell parser from the ~Parser.y~ file in the ~src~ directory tree.
+  * ~eigen~ :: the Eigen C++ library (header include files needed).
+  * ~lbfgspp~ :: The L-BFGS C++ library (header include files needed).
+  * ~BLAS~ :: BLAS library
+  * ~liblapack~ :: lapack library
+  * ~GSL~ :: GSL library
+  * ~GHC~ :: The GHC haskell compiler
+
+  The ~eigen~ and ~lbfgspp~ packages may be obtained via local git
+  submodules if they are not supplied by the local package manager
+  (e.g. ~nix~):
+
+** Running grappa-c
+
+   The grappa-c compiler is run to perform the compilation of the
+   grappa-language model into a binary executable, using GHC Template
+   Haskell techniques internally.  The grappa-c compiler therefore has
+   the following runtime requirements:
+
+   * Either the grappa package is installed or the grappa sources are available.
+   * ~BLAS~ :: BLAS library to link to
+   * ~liblapack~ :: lapack library to link to
+   * ~GSL~ :: GSL library to link to
+   * ~GHC~ :: The GHC haskell compiler
+   * If using grappa from source, the following must also be available
+     in the current environment where ~grappa-c~ is invoked:
+     * ~alex~ :: to generate the Haskell lexical analyzer from the ~Lexer.x~ file in the ~src~ directory tree.
+     * ~happy~ :: to generate the Haskell parser from the ~Parser.y~ file in the ~src~ directory tree.
+     * ~eigen~ :: the Eigen C++ library (header include files needed).
+     * ~lbfgspp~ :: The L-BFGS C++ library (header include files needed).
+
+   By default, the grappa-c compiler will assume that the Haskell
+   package dependencies (all the sources listed in the ~grappa.cabal~
+   file and optionally ~grappa~ itself) are present in the current
+   environment.  This will be the case when using the ~nix~ build
+   tooling.  The following tools can provide alternatives for
+   dependency management when running grappa-c:
+
+   * ~stack~ [optional] :: if the grappa-c compiler should use stack to manage dependencies
+   * ~cabal-install~ [optional] :: if the grappa-c compiler should use cabal v2 to manage dependencies
+
+** Running the output binary executable
+
+   The binary executable emitted by the grappa compiler must be run with the following:
+   * ~BLAS~ :: BLAS library runtime (e.g. shared library)
+   * ~liblapack~ :: lapack library runtime
+   * ~GSL~ :: GSL library runtime
+
+* Build tool selection
+
+   When working with grappa, there are a couple of different build
+   tool combinations that can be used:
+
+   * nix  (recommended)
+   * cabal
+   * stack
+
+** Building with nix
+
+   The ~nix~ toolset is the recommended method to use for
+   building/using grappa because it will handle all dependency
+   requirements, including ~BLAS~, ~liblapack~, and ~GSL~.  It is not
+   necessary to use the git submodules when building with nix.
+
+   To install grappa for general use via nix:
+
+   #+BEGIN_EXAMPLE
+   $ nix-env -i -f default.nix
+   #+END_EXAMPLE
+
+   or build a local version
+
+   #+BEGIN_EXAMPLE
+   $ nix build
+   [builds into ./result/bin]
+   #+END_EXAMPLE
+
+   Once this is completed, the PATH environment will have ~grappa-c~
+   available and it will have the ability to build and run grappa
+   applications.  The ~grappa-c~ compiler does not need any special
+   flags to find dependencies when used in this mode.
+
+   If the grappa package is not installed in the haskell registry, the
+   GRAPPA_LIB environment variable should be set to the location of
+   the grappa source.
+
+   For working on grappa with a temporary environment:
+
+   #+BEGIN_EXAMPLE
+   $ nix-shell
+   #+END_EXAMPLE
+
+   And then use ~cabal v1-build~ and ~cabal v1-test~ as needed.
+
+** Building with cabal
+
+*** Building grappa-c
+
+   You must use your OS package manager to install the following:
+     * ~GHC 8.4.4~
+     * ~cabal-install~
+
+   To build ~grappa-c~, use cabal v2:
+
+   #+BEGIN_EXAMPLE
+   $ cabal v2-build grappa-c
+   #+END_EXAMPLE
+
+   Note that if you omit the ~grappa-c~ specification above, cabal
+   will also attempt to build the grappa library.  This is fine, but
+   it will require the additional dependencies described below in the
+   "Running grappa-c" section.
+
+   The cabal v2 process will download all Haskell dependency packages
+   and install them in the ~dist-newstyle~ subdirectory in the grappa
+   source root.
+
+*** Running grappa-c
+
+   You must use your OS package manager to install the following:
+     * ~BLAS~
+     * ~liblapack~
+     * ~GSL~
+     * ~GHC 8.4.4~
+     * ~cabal-install~
+     * ~alex~
+     * ~happy~
+
+   You must checkout the ~eigen~ and ~lbfgspp~ git submodules:
+
+   #+BEGIN_EXAMPLE
+   $ git submodules init
+   $ git submodules checkout
+   #+END_EXAMPLE
+
+   If the grappa package is not installed in the haskell registry, the
+   GRAPPA_LIB environment variable should be set to the location of
+   the grappa source.
+
+   #+BEGIN_EXAMPLE
+   $ GRAPPA_LIB=$(pwd) cabal v2-run grappa-c -- --cabal path/to/model.grappa
+   #+END_EXAMPLE
+
+   It may be necessary to provide additional include path
+   specifications for locating the ~blas~, ~liblapack~, and ~gsl~
+   modules:
+
+   #+BEGIN_EXAMPLE
+   $ GRAPPA_LIB=$(pwd) cabal v2-run grappa-c \
+       --extra-include-dirs=path/to/blas/include \
+       --extra-include-dirs=path/to/liblapack/include \
+       --extra-lib-dirs=path/to/blas/lib \
+       --extra-lib-dirs=path/to/liblapack/lib \
+       -- --cabal path/to/model.grappa
+   #+END_EXAMPLE
+
+** Building with stack
+
+*** Building grappa-c
+
+   You must use your OS package manager to install the following:
+     * ~GHC 8.4.4~
+     * ~stack~
+
+   To build ~grappa-c~, use cabal v2:
+
+   #+BEGIN_EXAMPLE
+   $ ./build.sh
+   #+END_EXAMPLE
+
+   The cabal v2 process will download all Haskell dependency packages
+   and install them in the ~.stack~ subdirectory in your home directory.
+
+*** Running grappa-c
+
+   You must use your OS package manager to install the following:
+     * ~BLAS~
+     * ~liblapack~
+     * ~GSL~
+     * ~GHC 8.4.4~
+     * ~stack~
+
+   You must checkout the ~eigen~ and ~lbfgspp~ git submodules:
+
+   #+BEGIN_EXAMPLE
+   $ git submodules init
+   $ git submodules checkout
+   #+END_EXAMPLE
+
+   If the grappa package is not installed in the haskell registry, the
+   GRAPPA_LIB environment variable should be set to the location of
+   the grappa source.
+
+   #+BEGIN_EXAMPLE
+   $ GRAPPA_LIB=$(pwd) stack run --stack path/to/model.grappa
+   #+END_EXAMPLE
+
+   It may be necessary to provide additional include path
+   specifications for locating the ~blas~, ~liblapack~, and ~gsl~
+   modules:
+
+   #+BEGIN_EXAMPLE
+   $ GRAPPA_LIB=$(pwd) stack \
+       --extra-include-dirs path/to/blas/include \
+       --extra-include-dirs path/to/liblapack/include \
+       --extra-lib-dirs path/to/blas/lib \
+       --extra-lib-dirs path/to/liblapack/lib \
+       run --stack path/to/model.grappa
+   #+END_EXAMPLE
